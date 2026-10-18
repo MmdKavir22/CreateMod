@@ -3,10 +3,11 @@
   "id": "testmod",
   "version": "${version}",
   "name": "Test Mod",
-  "description": "Simple test mod",
+  "description": "Magic wand with mana, projectile, teleport and healing",
   "environment": "*",
   "entrypoints": {
-    "main": ["ir.mmdkavir.testmod.TestMod"]
+    "main": ["ir.mmdkavir.testmod.TestMod"],
+    "client": ["ir.mmdkavir.testmod.TestModClient"]
   },
   "depends": {
     "fabricloader": ">=0.16.0",
