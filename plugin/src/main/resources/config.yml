@@ -1,0 +1,17 @@
+protocol:
+  version: 1
+  debug-logging: false
+viewing-range:
+  blocks: 64
+limits:
+  max-tracked-entities: 4096
+  max-definitions: 128
+mobs:
+  undead_knight:
+    display-name: "Undead Knight"
+    fallback-entity: "minecraft:zombie"
+    model: "undead_knight"
+    texture: "undead_knight"
+    scale: 1.15
+    summon-duration-ticks: 40
+    animations: { idle: "idle", walk: "walk", attack: "attack", hurt: "hurt", death: "death", summon: "summon_portal", emerge: "emerge" }

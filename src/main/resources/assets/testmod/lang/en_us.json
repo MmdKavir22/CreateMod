@@ -1,7 +1,0 @@
-{
-  "item.testmod.test_wand": "Test Wand",
-  "item.testmod.wand_bolt": "Wand Bolt",
-  "entity.testmod.wand_bolt": "Wand Bolt",
-  "key.testmod.heal": "Wand: Heal",
-  "category.testmod": "Test Mod"
-}
