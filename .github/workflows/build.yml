@@ -34,6 +34,10 @@ jobs:
           if [ -z "$VERSION" ]; then echo "::error::version not found in gradle.properties"; exit 1; fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # The executable bit is lost when files are uploaded via the GitHub web UI or from Windows.
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
       - name: Build and test
         run: ./gradlew build --no-daemon
 
