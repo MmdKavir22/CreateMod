@@ -1,2 +1,0 @@
-allprojects { group = 'ir.mmdkavir.necrofx'; version = '1.0.0'; repositories { maven { url = 'https://repo.papermc.io/repository/maven-public/' }; mavenCentral() } }
-subprojects { apply plugin: 'java'; java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }; tasks.withType(JavaCompile).configureEach { options.release = 21; options.encoding = 'UTF-8' } }

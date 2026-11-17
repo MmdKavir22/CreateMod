@@ -1,2 +1,0 @@
-rootProject.name = 'necromancerfx-plugin'
-include 'api', 'plugin'

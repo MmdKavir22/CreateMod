@@ -1,9 +1,0 @@
-# Illustrative Skript example only. A Java API registration method for entities is not exposed yet.
-command /summonknight:
-    permission: necromancerfx.command
-    trigger:
-        spawn 1 zombie at location of player
-        set {_z} to last spawned entity
-        set name of {_z} to "&5☠ Undead Knight"
-        apply glowing to {_z} for 999 seconds
-        send "&5Undead Knight summoned (vanilla entity)." to player
