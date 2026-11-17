@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "testmod",
+	"version": "${version}",
+	"name": "Test Mod",
+	"description": "A minimal test mod: one item, one command and a startup log message.",
+	"authors": ["MmdKavir"],
+	"license": "MIT",
+	"icon": "assets/testmod/textures/item/test_item.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["ir.mmdkavir.testmod.TestMod"]
+	},
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
