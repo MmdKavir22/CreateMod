@@ -8,7 +8,7 @@ object ChatLib {
     fun chat(message: Any?) {
         val mc = Minecraft.getInstance()
         val component = Component.literal(addColor(message.toString()))
-        mc.execute { mc.gui.getChat().addMessage(component) }
+        mc.execute { mc.player?.displayClientMessage(component, false) }
     }
 
     @JvmStatic

@@ -3,21 +3,22 @@ package com.chattriggers.ctjs.commands
 import com.chattriggers.ctjs.Reference
 import com.chattriggers.ctjs.minecraft.libs.ChatLib
 import com.mojang.brigadier.CommandDispatcher
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
+import com.mojang.brigadier.builder.LiteralArgumentBuilder
+import com.mojang.brigadier.builder.RequiredArgumentBuilder
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 
 object CTCommand {
     fun register(dispatcher: CommandDispatcher<FabricClientCommandSource>) {
         val root = dispatcher.register(
-            ClientCommandManager.literal("chattriggers")
+            LiteralArgumentBuilder.literal<FabricClientCommandSource>("chattriggers")
                 .executes { ChatLib.chat(getUsage()); 1 }
-                .then(ClientCommandManager.literal("load").executes { Reference.loadCT(); 1 })
-                .then(ClientCommandManager.literal("reload").executes { Reference.loadCT(); 1 })
-                .then(ClientCommandManager.literal("refresh").executes { Reference.loadCT(); 1 })
-                .then(ClientCommandManager.literal("unload").executes { Reference.unloadCT(); 1 })
+                .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("load").executes { Reference.loadCT(); 1 })
+                .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("reload").executes { Reference.loadCT(); 1 })
+                .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("refresh").executes { Reference.loadCT(); 1 })
+                .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("unload").executes { Reference.unloadCT(); 1 })
         )
 
-        dispatcher.register(ClientCommandManager.literal("ct").redirect(root))
+        dispatcher.register(LiteralArgumentBuilder.literal<FabricClientCommandSource>("ct").redirect(root))
     }
 
     private fun getUsage() = """

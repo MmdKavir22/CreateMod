@@ -6,7 +6,8 @@ import com.chattriggers.ctjs.utils.console.LogType
 import com.mojang.brigadier.CommandDispatcher
 import com.mojang.brigadier.arguments.StringArgumentType
 import com.mojang.brigadier.context.CommandContext
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager
+import com.mojang.brigadier.builder.LiteralArgumentBuilder
+import com.mojang.brigadier.builder.RequiredArgumentBuilder
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource
 
 class Command(
@@ -70,10 +71,10 @@ class Command(
             }
 
             d.register(
-                ClientCommandManager.literal(commandName)
+                LiteralArgumentBuilder.literal<FabricClientCommandSource>(commandName)
                     .executes { exec(it, false) }
                     .then(
-                        ClientCommandManager.argument("args", StringArgumentType.greedyString())
+                        RequiredArgumentBuilder.argument<FabricClientCommandSource, String>("args", StringArgumentType.greedyString())
                             .suggests { ctx, builder ->
                                 val args = ctx.input.substringAfter(' ', "").split(" ").toTypedArray()
                                 activeCommands[commandName]?.complete(args)?.forEach(builder::suggest)

@@ -35,6 +35,15 @@ object JSLoader : ILoader {
     private lateinit var scope: Scriptable
     private lateinit var require: CTRequire
 
+    private val exportedModuleMethod = Require::class.java.getDeclaredMethod(
+        "getExportedModuleInterface",
+        Context::class.java,
+        String::class.java,
+        URI::class.java,
+        URI::class.java,
+        Boolean::class.javaPrimitiveType,
+    ).apply { isAccessible = true }
+
     override fun exec(type: TriggerType, args: Array<out Any?>) {
         triggers[type]?.forEach { it.trigger(args) }
     }
@@ -154,7 +163,11 @@ object JSLoader : ILoader {
         moduleProvider: ModuleScriptProvider,
     ) : Require(moduleContext, scope, moduleProvider, null, null, false) {
         fun loadCTModule(cachedName: String, uri: URI): Scriptable {
-            return getExportedModuleInterface(moduleContext, cachedName, uri, null, false)
+            try {
+                return exportedModuleMethod.invoke(this, moduleContext, cachedName, uri, null, false) as Scriptable
+            } catch (e: java.lang.reflect.InvocationTargetException) {
+                throw e.targetException
+            }
         }
     }
 }
