@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "chattriggers",
+  "version": "${version}",
+  "name": "ChatTriggers",
+  "description": "ChatTriggers is a framework that allows for live scripting and client modification using JavaScript.",
+  "authors": ["FalseHonesty", "Ecolsson", "kerbybit"],
+  "contact": {
+    "homepage": "https://www.chattriggers.com"
+  },
+  "license": "MIT",
+  "icon": "assets/chattriggers/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.chattriggers.ctjs.CTJS"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
