@@ -10,7 +10,6 @@ import kotlin.math.sqrt
 object ActivityLog {
     private var hadPlayer = false
     private var lastLevel: Any? = null
-    private var lastDimension: String? = null
     private var lastHealth: Double? = null
     private var lastAbsorption: Double? = null
     private var lastFood: Double? = null
@@ -26,7 +25,38 @@ object ActivityLog {
     private var watchKnockback = 0
     private var dead = false
 
-    val categories = listOf("health", "knockback", "movement", "items", "screens", "world")
+    private var joinGrace = 0
+    private var lastInventory: Array<String>? = null
+    private var lastSelectedSlot: Int? = null
+    private var lastMenuName: String? = null
+    private var menuGrace = 0
+    private var lastMenuSlots: List<String>? = null
+    private var lastCarried: String? = null
+    private val keyState = HashMap<String, Boolean>()
+    private val mouseState = BooleanArray(3)
+    private var lastTarget: String? = null
+    private var lastXp: Double? = null
+    private var lastEffects: Set<String> = emptySet()
+
+    val categories = listOf(
+        "health", "knockback", "movement", "items", "inventory", "container",
+        "clicks", "keys", "screens", "target", "effects", "world"
+    )
+
+    val categoryHelp = mapOf(
+        "health" to "damage, healing, hunger, fire, death",
+        "knockback" to "knockback and sudden velocity changes",
+        "movement" to "jump, sprint, sneak, teleport",
+        "items" to "item held in main hand",
+        "inventory" to "every inventory slot change, hotbar slot",
+        "container" to "chests/menus opened, slot changes, cursor item",
+        "clicks" to "mouse button presses (also inside GUIs)",
+        "keys" to "every bound key press (movement, hotbar, inventory...)",
+        "screens" to "screens opened and closed",
+        "target" to "entity under the crosshair",
+        "effects" to "potion effects gained or lost",
+        "world" to "join, leave, dimension change, xp level"
+    )
 
     fun categoryOf(text: String): String = when {
         text.startsWith("DAMAGE") || text.startsWith("HEAL") || text.startsWith("HURT") ||
@@ -36,21 +66,49 @@ object ActivityLog {
         text.startsWith("JUMP") || text.startsWith("SPRINT") || text.startsWith("SNEAK") ||
                 text.startsWith("TELEPORT") -> "movement"
         text.startsWith("HELD") -> "items"
+        text.startsWith("INVENTORY") || text.startsWith("HOTBAR") -> "inventory"
+        text.startsWith("CONTAINER") || text.startsWith("CURSOR") -> "container"
+        text.startsWith("CLICK") -> "clicks"
+        text.startsWith("KEY") -> "keys"
         text.startsWith("SCREEN") -> "screens"
+        text.startsWith("TARGET") -> "target"
+        text.startsWith("EFFECT") -> "effects"
         else -> "world"
     }
 
     fun event(text: String) {
         if (categoryOf(text) in Config.disabledEventCategories) return
+
+        val hideWords = Config.eventHideWords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (hideWords.any { text.contains(it, ignoreCase = true) }) return
+
         if (Config.logEvents) CTLog.add(LogType.INFO, "[EVENT] $text")
         if (Config.eventsInChat) ChatLib.chat("&8[EVENT] &7$text")
     }
 
     private fun fmt(d: Double) = String.format("%.2f", d)
 
+    private fun describe(stack: Any?): String {
+        if (stack == null || Refl.call(stack, "isEmpty") == true) return "empty"
+
+        val name = Refl.text(Refl.call(stack, "getHoverName")) ?: stack.toString()
+        val count = (Refl.call(stack, "getCount") as? Number)?.toInt() ?: 1
+        return "$name x$count"
+    }
+
+    private fun slotName(index: Int) = when (index) {
+        in 0..8 -> "hotbar ${index + 1}"
+        in 9..35 -> "inventory ${index - 8}"
+        36 -> "boots"
+        37 -> "leggings"
+        38 -> "chestplate"
+        39 -> "helmet"
+        40 -> "offhand"
+        else -> "slot $index"
+    }
+
     private fun reset() {
         lastLevel = null
-        lastDimension = null
         lastHealth = null
         lastAbsorption = null
         lastFood = null
@@ -64,6 +122,21 @@ object ActivityLog {
         lastItem = null
         watchKnockback = 0
         dead = false
+        lastInventory = null
+        lastSelectedSlot = null
+        lastMenuName = null
+        lastMenuSlots = null
+        lastCarried = null
+        lastTarget = null
+        lastXp = null
+        lastEffects = emptySet()
+    }
+
+    private inline fun safe(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Throwable) {
+        }
     }
 
     fun tick() {
@@ -78,6 +151,9 @@ object ActivityLog {
             else if (lastScreen != null) event("SCREEN closed: $lastScreen")
             lastScreen = screenName
         }
+
+        safe { trackMouse(mc, screenName) }
+        safe { trackKeys(mc) }
 
         if (player == null) {
             if (hadPlayer) {
@@ -94,18 +170,60 @@ object ActivityLog {
         if (!hadPlayer) {
             event("JOINED world, dimension=$dimension")
             hadPlayer = true
+            joinGrace = 40
         } else if (level !== lastLevel && lastLevel != null) {
             event("WORLD changed: dimension=$dimension")
             lastPos = null
             lastVel = null
+            joinGrace = 40
         }
         lastLevel = level
-        lastDimension = dimension
 
+        if (joinGrace > 0) joinGrace--
+
+        safe { trackBody(player) }
+        safe { trackInventory(player) }
+        safe { trackContainer(player) }
+        safe { trackTarget(mc) }
+        safe { trackXpAndEffects(player) }
+    }
+
+    private fun trackMouse(mc: Minecraft, screenName: String?) {
+        val handler = Refl.get(mc, "mouseHandler") ?: return
+        val names = listOf("left", "right", "middle")
+        val methods = listOf("isLeftPressed", "isRightPressed", "isMiddlePressed")
+
+        for (i in 0..2) {
+            val down = Refl.call(handler, methods[i]) as? Boolean ?: continue
+            if (down && !mouseState[i]) {
+                event("CLICK ${names[i]} button pressed" + (screenName?.let { " in screen $it" } ?: " in world"))
+            }
+            mouseState[i] = down
+        }
+    }
+
+    private fun trackKeys(mc: Minecraft) {
+        val options = Refl.get(mc, "options") ?: return
+        val mappings = Refl.get(options, "keyMappings") as? Array<*> ?: return
+
+        for (mapping in mappings) {
+            val name = Refl.call(mapping, "getName") as? String ?: continue
+            val down = Refl.call(mapping, "isDown") as? Boolean ?: continue
+            val previous = keyState[name] ?: false
+
+            if (down && !previous) {
+                val key = Refl.text(Refl.call(mapping, "getTranslatedKeyMessage"))
+                event("KEY $name" + (key?.let { " ($it)" } ?: "") + " pressed")
+            }
+            keyState[name] = down
+        }
+    }
+
+    private fun trackBody(player: Any) {
         val health = Refl.num(player, "health")
         val absorption = Refl.num(player, "absorptionAmount")
         val food = Refl.num(Refl.call(player, "getFoodData"), "foodLevel")
-        val hurt = Refl.num(player, "hurtTime") ?: (Refl.field(player, "hurtTime") as? Number)?.toDouble() ?: 0.0
+        val hurt = Refl.num(player, "hurtTime") ?: 0.0
 
         val velObj = Refl.call(player, "getDeltaMovement")
         val vel = if (velObj != null) doubleArrayOf(
@@ -206,10 +324,7 @@ object ActivityLog {
         if (fire != lastFire) event(if (fire) "ON FIRE" else "FIRE stopped")
         lastFire = fire
 
-        val stack = Refl.call(player, "getMainHandItem")
-        val item = if (stack == null || Refl.call(stack, "isEmpty") == true) "empty" else
-            (Refl.text(Refl.call(stack, "getHoverName")) ?: stack.toString()) +
-                    " x${(Refl.call(stack, "getCount") as? Number)?.toInt() ?: 1}"
+        val item = describe(Refl.call(player, "getMainHandItem"))
         if (lastItem != null && item != lastItem) event("HELD ITEM $lastItem -> $item")
         lastItem = item
 
@@ -226,5 +341,100 @@ object ActivityLog {
         lastHurt = hurt
         lastVel = vel
         lastPos = pos
+    }
+
+    private fun trackInventory(player: Any) {
+        val inventory = Refl.call(player, "getInventory") ?: return
+        val size = (Refl.call(inventory, "getContainerSize") as? Number)?.toInt() ?: return
+        val snapshot = Array(size) { describe(Refl.callArg(inventory, "getItem", it)) }
+        val previous = lastInventory
+
+        if (previous != null && previous.size == snapshot.size && joinGrace == 0) {
+            for (i in snapshot.indices) {
+                if (snapshot[i] != previous[i]) {
+                    event("INVENTORY ${slotName(i)}: ${previous[i]} -> ${snapshot[i]}")
+                }
+            }
+        }
+        lastInventory = snapshot
+
+        val selected = (Refl.get(inventory, "selectedSlot") as? Number)?.toInt()
+            ?: (Refl.field(inventory, "selected") as? Number)?.toInt()
+        if (selected != null) {
+            if (lastSelectedSlot != null && selected != lastSelectedSlot) {
+                event("HOTBAR slot ${lastSelectedSlot!! + 1} -> ${selected + 1}")
+            }
+            lastSelectedSlot = selected
+        }
+    }
+
+    private fun trackContainer(player: Any) {
+        val menu = Refl.get(player, "containerMenu") ?: return
+        val name = menu.javaClass.simpleName
+        val isPlayerMenu = name == "InventoryMenu"
+        val slots = Refl.get(menu, "slots") as? List<*>
+
+        if (name != lastMenuName) {
+            if (lastMenuName != null) {
+                if (isPlayerMenu) event("CONTAINER closed: $lastMenuName")
+                else event("CONTAINER opened: $name (${slots?.size ?: "?"} slots)")
+            }
+            lastMenuName = name
+            lastMenuSlots = null
+            menuGrace = 4
+        }
+
+        val snapshot = slots?.map { describe(Refl.call(it, "getItem")) }
+        val previous = lastMenuSlots
+
+        if (menuGrace > 0) {
+            menuGrace--
+        } else if (!isPlayerMenu && snapshot != null && previous != null && previous.size == snapshot.size) {
+            for (i in snapshot.indices) {
+                if (snapshot[i] != previous[i]) {
+                    event("CONTAINER $name slot $i: ${previous[i]} -> ${snapshot[i]}")
+                }
+            }
+        }
+        lastMenuSlots = snapshot
+
+        val carried = describe(Refl.call(menu, "getCarried"))
+        if (lastCarried != null && carried != lastCarried && joinGrace == 0) {
+            event("CURSOR item: $lastCarried -> $carried")
+        }
+        lastCarried = carried
+    }
+
+    private fun trackTarget(mc: Minecraft) {
+        val entity = Refl.get(mc, "crosshairPickEntity")
+        val target = if (entity == null) null else
+            (Refl.text(Refl.call(entity, "getName")) ?: entity.javaClass.simpleName) + " (" + entity.javaClass.simpleName + ")"
+
+        if (target != lastTarget) {
+            if (target != null) event("TARGET entity: $target")
+            else if (lastTarget != null) event("TARGET lost: $lastTarget")
+            lastTarget = target
+        }
+    }
+
+    private fun trackXpAndEffects(player: Any) {
+        val xp = Refl.num(player, "experienceLevel")
+        if (xp != null) {
+            if (lastXp != null && xp != lastXp) event("XP level ${lastXp!!.toInt()} -> ${xp.toInt()}")
+            lastXp = xp
+        }
+
+        val effects = Refl.call(player, "getActiveEffects") as? Collection<*> ?: return
+        val current = effects.map {
+            val id = Refl.call(it, "getDescriptionId")?.toString() ?: it.toString()
+            val level = ((Refl.call(it, "getAmplifier") as? Number)?.toInt() ?: 0) + 1
+            "$id $level"
+        }.toSet()
+
+        if (joinGrace == 0) {
+            (current - lastEffects).forEach { event("EFFECT gained: $it") }
+            (lastEffects - current).forEach { event("EFFECT lost: $it") }
+        }
+        lastEffects = current
     }
 }

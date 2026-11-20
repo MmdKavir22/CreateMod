@@ -15,6 +15,17 @@ object Refl {
         return null
     }
 
+    fun callArg(target: Any?, name: String, arg: Any): Any? {
+        if (target == null) return null
+
+        val method = target.javaClass.methods.firstOrNull { it.name == name && it.parameterCount == 1 } ?: return null
+        return try {
+            method.invoke(target, arg)
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
     fun field(target: Any?, name: String): Any? {
         if (target == null) return null
 

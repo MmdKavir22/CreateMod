@@ -11,6 +11,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
+import java.util.Base64
 import kotlin.concurrent.thread
 
 object ScriptRepo {
@@ -45,19 +46,104 @@ object ScriptRepo {
 
     fun isInstalled(name: String) = File(ModuleManager.modulesFolder, name).isDirectory
 
-    private fun download(url: String): ByteArray {
+    private val tokenFile = File("./config/ChatTriggers/github-token.txt")
+
+    fun token(): String? {
+        return try {
+            if (tokenFile.exists()) tokenFile.readText().trim().ifEmpty { null } else null
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    fun hasToken() = token() != null
+
+    fun setToken(value: String) {
+        tokenFile.parentFile.mkdirs()
+        tokenFile.writeText(value.trim())
+    }
+
+    private fun api(method: String, url: String, body: ByteArray? = null): Pair<Int, ByteArray> {
         val connection = URI(url).toURL().openConnection() as HttpURLConnection
+        connection.requestMethod = method
         connection.setRequestProperty("User-Agent", "ChatTriggers-Fabric")
         connection.setRequestProperty("Accept", "application/vnd.github+json")
+        token()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
         connection.connectTimeout = 15000
         connection.readTimeout = 30000
 
+        if (body != null) {
+            connection.doOutput = true
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.outputStream.use { it.write(body) }
+        }
+
         val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        return code to (stream?.use { it.readBytes() } ?: ByteArray(0))
+    }
+
+    private fun download(url: String): ByteArray {
+        val (code, body) = api("GET", url)
         if (code !in 200..299) {
             throw IOException("HTTP $code ($url)")
         }
 
-        return connection.inputStream.use { it.readBytes() }
+        return body
+    }
+
+    @Synchronized
+    fun uploadModule(name: String): Int {
+        require(validName.matches(name) && name != "." && name != "..") { "Invalid script name: $name" }
+        if (token() == null) throw IllegalStateException("No GitHub token set (Config tab, or /ct token <token>)")
+
+        val dir = File(ModuleManager.modulesFolder, name)
+        require(dir.isDirectory) { "Module $name was not found in modules/" }
+
+        val files = dir.walk().filter { it.isFile }.toList()
+        files.forEach { file ->
+            val relative = file.relativeTo(dir).path.replace(File.separatorChar, '/')
+            putFile("scripts/$name/$relative", file.readBytes())
+        }
+
+        cached = emptyList()
+        treePaths = emptyList()
+        return files.size
+    }
+
+    private fun putFile(path: String, bytes: ByteArray) {
+        val url = "https://api.github.com/repos/${repoName()}/contents/${encodePath(path)}"
+        val explicitBranch = branch() != "HEAD"
+        val refQuery = if (explicitBranch) "?ref=${URLEncoder.encode(branch(), "UTF-8")}" else ""
+
+        val (getCode, getBody) = api("GET", url + refQuery)
+        val sha = if (getCode == 200) CTJS.gson.fromJson(String(getBody), JsonObject::class.java).get("sha")?.asString else null
+
+        val json = JsonObject()
+        json.addProperty("message", "Update $path via ChatTriggers")
+        json.addProperty("content", Base64.getEncoder().encodeToString(bytes))
+        if (sha != null) json.addProperty("sha", sha)
+        if (explicitBranch) json.addProperty("branch", branch())
+
+        val (code, response) = api("PUT", url, CTJS.gson.toJson(json).toByteArray())
+        if (code !in 200..201) {
+            throw IOException("HTTP $code while uploading $path: ${String(response).take(200)}")
+        }
+    }
+
+    fun uploadAsync(name: String, status: (String) -> Unit = {}) {
+        thread {
+            try {
+                status("Uploading $name...")
+                val count = uploadModule(name)
+                status("Uploaded $name ($count files)")
+                ChatLib.chat("&a[CT] Uploaded &f$name &a($count files) to ${spec()}")
+            } catch (e: Throwable) {
+                CTLog.add(LogType.ERROR, "Upload of $name failed: $e")
+                status("Failed: ${e.message}")
+                ChatLib.chat("&c[CT] Upload of $name failed: ${e.message}")
+            }
+        }
     }
 
     @Synchronized

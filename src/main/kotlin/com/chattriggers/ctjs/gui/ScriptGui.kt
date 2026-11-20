@@ -12,6 +12,8 @@ import com.chattriggers.ctjs.utils.console.CTLog
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.components.Button
+import net.minecraft.client.gui.components.EditBox
+import java.io.File
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 
@@ -20,6 +22,7 @@ private enum class Tab(val title: String) {
     MODULES("Modules"),
     CONSOLE("Console"),
     EVENTS("Events"),
+    EDITOR("Editor"),
     SETTINGS("Settings"),
     INFO("Info"),
 }
@@ -29,7 +32,10 @@ private class Row(
     val onClick: (() -> Unit)? = null,
     val side: String? = null,
     val onSide: (() -> Unit)? = null,
+    val input: Input? = null,
 )
+
+private class Input(val id: String, val hint: String, val apply: (String) -> Unit, val button: String = "Set")
 
 class ScriptGui : Screen(Component.literal("ChatTriggers")) {
     override fun init() {
@@ -37,6 +43,7 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
     }
 
     fun rebuild() {
+        flush()
         clearWidgets()
         build()
     }
@@ -52,7 +59,8 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
     }
 
     private fun build() {
-        val w = minOf(width - 20, 380)
+        val w = minOf(width - 20, 420)
+        boxes.clear()
         val x = (width - w) / 2
 
         val tabs = Tab.values()
@@ -68,7 +76,13 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
             addRenderableWidget(button)
         }
 
+        if (tab == Tab.EDITOR && editFile != null) {
+            buildEditor(x, w)
+            return
+        }
+
         val rows = when (tab) {
+            Tab.EDITOR -> editorBrowserRows()
             Tab.SCRIPTS -> scriptRows()
             Tab.MODULES -> moduleRows()
             Tab.CONSOLE -> consoleRows()
@@ -87,7 +101,22 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
             val y = top + index * 22
             val onClick = row.onClick
 
-            if (row.side != null) {
+            if (row.input != null) {
+                val input = row.input
+                val mainWidth = w - 74
+                val box = makeBox(x, y, mainWidth, 20, inputs[input.id] ?: "", input.hint)
+                if (box != null) {
+                    boxes[input.id] = box
+                    addRenderableWidget(box)
+                } else {
+                    addRenderableWidget(label("(text box unavailable)", x, y, mainWidth))
+                }
+                addRenderableWidget(action(input.button, x + mainWidth + 4, y, 70) {
+                    flush()
+                    input.apply(inputs[input.id] ?: "")
+                    rebuild()
+                })
+            } else if (row.side != null) {
                 val mainWidth = w - 74
                 addRenderableWidget(if (onClick != null) action(row.text, x, y, mainWidth) { onClick() } else label(row.text, x, y, mainWidth))
                 addRenderableWidget(action(row.side, x + mainWidth + 4, y, 70) { row.onSide?.invoke() })
@@ -109,6 +138,220 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
             rebuild()
         })
         addRenderableWidget(action("Close", x + w - 70, height - 24, 70) { show(null) })
+    }
+
+
+    private val boxes = mutableMapOf<String, EditBox>()
+
+    private fun makeBox(x: Int, y: Int, w: Int, h: Int, value: String, hint: String): EditBox? {
+        return try {
+            val mc = Minecraft.getInstance()
+            val font = Refl.get(mc, "font")
+            val ctor = EditBox::class.java.constructors.first {
+                it.parameterCount == 6 && it.parameterTypes[5].name.contains("Component")
+            }
+            val box = ctor.newInstance(font, x, y, w, h, Component.literal(hint)) as EditBox
+            Refl.callArg(box, "setMaxLength", 4096)
+            Refl.callArg(box, "setValue", value)
+            Refl.callArg(box, "setHint", Component.literal("§7$hint"))
+            box
+        } catch (e: Throwable) {
+            CTLog.add(com.chattriggers.ctjs.utils.console.LogType.WARN, "EditBox unavailable: $e")
+            null
+        }
+    }
+
+    private fun boxValue(box: EditBox?): String? = Refl.call(box, "getValue") as? String
+
+    private fun flush() {
+        boxes.forEach { (id, box) ->
+            val v = boxValue(box) ?: return@forEach
+            if (id == "line") {
+                if (editLine in editLines.indices && editLines[editLine] != v) {
+                    editLines[editLine] = v
+                    editDirty = true
+                }
+            } else inputs[id] = v
+        }
+    }
+
+    private fun header(text: String) = Row("§6§l▌ $text")
+
+    private fun clean(line: String, max: Int): String {
+        val t = line.replace("\t", "  ").replace('§', '?')
+        return if (t.length > max) t.take(max) + "…" else t
+    }
+
+    private fun buildEditor(x: Int, w: Int) {
+        val file = editFile ?: return
+        val quarter = (w - 6) / 4
+        val dirtyMark = if (editDirty) "§e*" else ""
+
+        fun save(): Boolean {
+            flush()
+            return try {
+                file.writeText(editLines.joinToString("\n"))
+                editDirty = false
+                true
+            } catch (e: Throwable) {
+                status = "Save failed: $e"
+                false
+            }
+        }
+
+        // Back on the very top, tabs row is row 6
+        addRenderableWidget(action("Save", x, 32, quarter) {
+            if (save()) status = "Saved ${file.name}"
+            rebuild()
+        })
+        addRenderableWidget(action("Save+Reload", x + quarter + 2, 32, quarter) {
+            if (save()) {
+                status = "Saved and reloading..."
+                Reference.loadCT()
+            }
+            rebuild()
+        })
+        addRenderableWidget(action("Upload", x + (quarter + 2) * 2, 32, quarter) {
+            if (save()) {
+                val module = moduleOf(file)
+                if (module == null) status = "File is not inside a module folder" else {
+                    status = "Uploading $module..."
+                    ScriptRepo.uploadAsync(module) { status = it; refresh() }
+                }
+            }
+            rebuild()
+        })
+        addRenderableWidget(action("Close", x + (quarter + 2) * 3, 32, quarter) {
+            flush()
+            editFile = null
+            rebuild()
+        })
+
+        addRenderableWidget(label("$dirtyMark§f${file.name} §7line ${editLine + 1}/${editLines.size}", x, 56, w))
+
+        val box = makeBox(x, 80, w, 20, if (editLine in editLines.indices) editLines[editLine] else "", "edit this line")
+        if (box != null) {
+            boxes["line"] = box
+            addRenderableWidget(box)
+        } else {
+            addRenderableWidget(label("(text box unavailable)", x, 80, w))
+        }
+
+        val top = 106
+        val perPage = maxOf(3, (height - top - 76) / 22)
+        val start = (editLine - perPage / 2).coerceIn(0, maxOf(0, editLines.size - perPage))
+        val maxChars = w / 6
+
+        for (i in start until minOf(editLines.size, start + perPage)) {
+            val current = i == editLine
+            val text = (if (current) "§e" else "§7") + String.format("%3d ", i + 1) + "§f" + clean(editLines[i], maxChars)
+            addRenderableWidget(action(text, x, top + (i - start) * 22, w) {
+                flush()
+                editLine = i
+                rebuild()
+            })
+        }
+
+        val y = height - 48 - 22
+        val sixth = (w - 10) / 5
+        addRenderableWidget(action("+ Below", x, y, sixth) {
+            flush()
+            editLines.add(editLine + 1, "")
+            editLine++
+            editDirty = true
+            rebuild()
+        })
+        addRenderableWidget(action("- Delete", x + (sixth + 2), y, sixth) {
+            flush()
+            if (editLines.size > 1) editLines.removeAt(editLine) else editLines[0] = ""
+            editLine = editLine.coerceAtMost(editLines.size - 1)
+            editDirty = true
+            rebuild()
+        })
+        addRenderableWidget(action("Up", x + (sixth + 2) * 2, y, sixth) {
+            flush()
+            editLine = maxOf(0, editLine - 1)
+            rebuild()
+        })
+        addRenderableWidget(action("Down", x + (sixth + 2) * 3, y, sixth) {
+            flush()
+            editLine = minOf(editLines.size - 1, editLine + 1)
+            rebuild()
+        })
+        addRenderableWidget(action("Dup", x + (sixth + 2) * 4, y, sixth) {
+            flush()
+            editLines.add(editLine + 1, editLines[editLine])
+            editLine++
+            editDirty = true
+            rebuild()
+        })
+
+        addRenderableWidget(label(status, x, height - 48, w))
+        addRenderableWidget(action("Close GUI", x + w - 80, height - 24, 80) { show(null) })
+    }
+
+    private fun moduleOf(file: File): String? {
+        val rel = try {
+            file.canonicalFile.relativeTo(ModuleManager.modulesFolder.canonicalFile).path
+        } catch (e: Throwable) {
+            return null
+        }
+        if (rel.startsWith("..")) return null
+        return rel.substringBefore(File.separatorChar).takeIf { it.isNotBlank() }
+    }
+
+    private fun openFile(file: File) {
+        editFile = file
+        editLines = file.readText().split("\n").map { it.removeSuffix("\r") }.toMutableList()
+        if (editLines.isEmpty()) editLines.add("")
+        editLine = 0
+        editDirty = false
+        status = "Opened ${file.name}"
+        rebuild()
+    }
+
+    private fun createScript(raw: String) {
+        val name = raw.trim().replace(Regex("[^A-Za-z0-9_-]"), "")
+        if (name.isEmpty()) {
+            status = "Enter a name (letters, digits, - _)"
+            return
+        }
+        val folder = File(ModuleManager.modulesFolder, name)
+        if (folder.exists()) {
+            status = "$name already exists"
+            return
+        }
+        folder.mkdirs()
+        val js = File(folder, "$name.js")
+        js.writeText("// $name\nregister(\"tick\", function () {\n    // runs every tick\n});\n")
+        File(folder, "metadata.json").writeText(
+            "{\n  \"name\": \"$name\",\n  \"version\": \"1.0.0\",\n  \"entry\": \"$name.js\",\n  \"creator\": \"\",\n  \"description\": \"\"\n}\n"
+        )
+        inputs["newScript"] = ""
+        openFile(js)
+        status = "Created $name"
+    }
+
+    private fun editorBrowserRows(): List<Row> {
+        val rows = mutableListOf<Row>()
+        rows += header("EDITOR")
+        rows += Row("", input = Input("newScript", "new script name", { createScript(it) }, "Create"))
+        rows += Row("§7Pick a file to edit. Upload sends the whole module to GitHub (needs /ct token).")
+
+        val folders = ModuleManager.modulesFolder.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name.lowercase() }
+            ?: emptyList()
+        folders.forEach { folder ->
+            rows += Row("§b${folder.name}", null, "Upload", {
+                status = "Uploading ${folder.name}..."
+                ScriptRepo.uploadAsync(folder.name) { status = it; refresh() }
+            })
+            folder.walk().filter { it.isFile && it.extension.lowercase() in editable }
+                .sortedBy { it.path }.forEach { f ->
+                    val rel = f.relativeTo(folder).path
+                    rows += Row("§7   §f$rel §7(${f.length()} B)", { openFile(f) })
+                }
+        }
+        return rows
     }
 
     private fun toggle(name: String, get: () -> Boolean, set: (Boolean) -> Unit): Row {
@@ -207,13 +450,15 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
             page = 0
             rebuild()
         })
+        rows += Row("", input = Input("consoleSearch", "search text", { page = 0 }, "Search"))
         rows += Row("§cClear console", {
             CTLog.clear()
             status = "Console cleared"
             rebuild()
         })
 
-        val lines = CTLog.last(500).reversed().filter {
+        val search = (inputs["consoleSearch"] ?: "").trim()
+        val lines = CTLog.last(500).reversed().filter { search.isEmpty() || it.contains(search, ignoreCase = true) }.filter {
             when (filter) {
                 1 -> "[ERROR]" in it || "[WARN]" in it
                 2 -> "[EVENT]" in it
@@ -243,13 +488,25 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         rows += toggle("Event log (file + console)", { Config.logEvents }, { Config.logEvents = it })
         rows += toggle("Show events live in chat", { Config.eventsInChat }, { Config.eventsInChat = it })
 
+        rows += header("HIDE WORDS (comma separated)")
+        if (inputs["hideWords"] == null) inputs["hideWords"] = Config.eventHideWords
+        rows += Row("", input = Input("hideWords", "e.g. KEY, TARGET", {
+            Config.eventHideWords = it
+            Config.save()
+            status = "Hide words saved"
+        }, "Save"))
+
+        rows += header("CATEGORIES (click to hide / show)")
         ActivityLog.categories.forEach { category ->
-            rows += toggle("  Category: $category", { category !in Config.disabledEventCategories }, {
-                if (it) Config.disabledEventCategories.remove(category) else Config.disabledEventCategories.add(category)
+            val on = category !in Config.disabledEventCategories
+            rows += Row((if (on) "§a● §f" else "§c○ §7") + category + " §8- " + (ActivityLog.categoryHelp[category] ?: ""), {
+                if (on) Config.disabledEventCategories.add(category) else Config.disabledEventCategories.remove(category)
+                Config.save()
+                rebuild()
             })
         }
 
-        rows += Row("§b--- recent events (newest first) ---")
+        rows += header("RECENT EVENTS (newest first)")
 
         val events = CTLog.last(500).reversed().filter { "[EVENT]" in it }.take(40)
         if (events.isEmpty()) rows += Row("§7No events yet")
@@ -277,6 +534,14 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
             rebuild()
         })
 
+        rows += header("GITHUB")
+        if (inputs["repo"] == null) inputs["repo"] = ScriptRepo.spec()
+        rows += Row("", input = Input("repo", "owner/repo[@branch]", { ScriptRepo.setSpec(it.trim()); status = "Repo set" }, "Set repo"))
+        rows += Row("", input = Input("token", "GitHub token (for upload)", {
+            if (it.isNotBlank()) { ScriptRepo.setToken(it.trim()); status = "Token saved" }
+            inputs["token"] = ""
+        }, "Set token"))
+        rows += Row("§7Token: " + (if (ScriptRepo.hasToken()) "§aset" else "§cnot set"))
         rows += Row("§7Script repo: §f${ScriptRepo.spec()}")
         rows += Row("§7Modules folder: §f${ModuleManager.modulesFolder.path}")
         rows += Row("§7Log file: §f${CTLog.file.path}")
@@ -296,7 +561,7 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
             rows += Row("§7$name: §f$value")
         }
 
-        rows += Row("§b--- ChatTriggers ---")
+        rows += header("CHATTRIGGERS")
         info("Version", Reference.MODVERSION)
         info("Scripts loaded", Reference.isLoaded)
         info("Modules installed", ModuleManager.modulesFolder.listFiles()?.count { it.isDirectory } ?: 0)
@@ -308,7 +573,7 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         val commands = Command.activeCommands.keys.sorted()
         info("Script commands", if (commands.isEmpty()) "none" else commands.joinToString(", ") { "/$it" })
 
-        rows += Row("§b--- Game ---")
+        rows += header("GAME")
         info("Minecraft", loader.getModContainer("minecraft").map { it.metadata.version.friendlyString }.orElse("?"))
         info("Fabric Loader", loader.getModContainer("fabricloader").map { it.metadata.version.friendlyString }.orElse("?"))
         info("Fabric API", loader.getModContainer("fabric-api").map { it.metadata.version.friendlyString }.orElse("not found"))
@@ -317,7 +582,7 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         info("Memory", "$usedMb / ${runtime.maxMemory() / 1024 / 1024} MB")
 
         val player = mc.player
-        rows += Row("§b--- Player ---")
+        rows += header("PLAYER")
         if (player == null) {
             rows += Row("§7Not in a world")
         } else {
@@ -346,6 +611,12 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         private var page = 0
         private var filter = 0
         private var confirmDelete: String? = null
+        private val inputs = mutableMapOf<String, String>()
+        private val editable = setOf("js", "json", "txt", "md", "html", "css", "yml", "yaml")
+        private var editFile: File? = null
+        private var editLines = mutableListOf("")
+        private var editLine = 0
+        private var editDirty = false
         private val expanded = mutableSetOf<String>()
 
         fun open() {

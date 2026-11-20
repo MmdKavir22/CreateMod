@@ -41,6 +41,9 @@ object Config {
     var eventsInChat = false
 
     @JvmField
+    var eventHideWords = ""
+
+    @JvmField
     val disabledEventCategories = mutableSetOf<String>()
 
     private val settingsFile = File("./config/ChatTriggers/settings.json")
@@ -50,6 +53,7 @@ object Config {
             if (!settingsFile.exists()) return
             val json = CTJS.gson.fromJson(settingsFile.readText(), JsonObject::class.java)
             json.get("logEvents")?.let { logEvents = it.asBoolean }
+            json.get("eventHideWords")?.let { eventHideWords = it.asString }
             json.get("eventsInChat")?.let { eventsInChat = it.asBoolean }
             json.get("threadedLoading")?.let { threadedLoading = it.asBoolean }
             json.get("clearConsoleOnLoad")?.let { clearConsoleOnLoad = it.asBoolean }
@@ -65,6 +69,7 @@ object Config {
         try {
             val json = JsonObject()
             json.addProperty("logEvents", logEvents)
+            json.addProperty("eventHideWords", eventHideWords)
             json.addProperty("eventsInChat", eventsInChat)
             json.addProperty("threadedLoading", threadedLoading)
             json.addProperty("clearConsoleOnLoad", clearConsoleOnLoad)

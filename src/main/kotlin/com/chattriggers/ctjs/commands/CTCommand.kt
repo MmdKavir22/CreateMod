@@ -40,6 +40,8 @@ object CTCommand {
                 .then(scriptsNode())
                 .then(importNode())
                 .then(repoNode())
+                .then(tokenNode())
+                .then(uploadNode())
         )
 
         dispatcher.register(LiteralArgumentBuilder.literal<FabricClientCommandSource>("ct").redirect(root))
@@ -54,6 +56,26 @@ object CTCommand {
             .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("off").executes { Config.logEvents = false; Config.eventsInChat = false; status(); 1 })
             .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("chat").executes { Config.eventsInChat = !Config.eventsInChat; status(); 1 })
     }
+
+    private fun tokenNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("token")
+        .executes { ChatLib.chat("&7GitHub token: &f${if (ScriptRepo.hasToken()) "set" else "not set"}"); 1 }
+        .then(
+            RequiredArgumentBuilder.argument<FabricClientCommandSource, String>("token", StringArgumentType.greedyString())
+                .executes { ctx: CommandContext<FabricClientCommandSource> ->
+                    ScriptRepo.setToken(StringArgumentType.getString(ctx, "token"))
+                    ChatLib.chat("&aGitHub token saved")
+                    1
+                }
+        )
+
+    private fun uploadNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("upload")
+        .then(
+            RequiredArgumentBuilder.argument<FabricClientCommandSource, String>("name", StringArgumentType.word())
+                .executes { ctx: CommandContext<FabricClientCommandSource> ->
+                    ScriptRepo.uploadAsync(StringArgumentType.getString(ctx, "name"))
+                    1
+                }
+        )
 
     private fun guiNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("gui")
         .executes { ScriptGui.open(); 1 }
@@ -120,6 +142,8 @@ object CTCommand {
         &2/ct unload &7- Unloads all of the ChatTriggers modules
         &2/ct console [lines] &7- Shows the latest console lines in chat
         &2/ct clear &7- Clears the console
+        &2/ct token <github token> &7- Saves the token used for uploads
+        &2/ct upload <name> &7- Uploads modules/<name> to scripts/<name>/ on GitHub
         &2/ct gui &7- Opens the script manager GUI
         &2/ct scripts &7- Lists scripts in the GitHub repo (scripts/<name>/)
         &2/ct import <name> &7- Imports scripts/<name>/ from GitHub into modules
