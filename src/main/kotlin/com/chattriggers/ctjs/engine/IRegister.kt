@@ -42,4 +42,20 @@ interface IRegister {
     fun registerCommand(method: Any): CommandTrigger {
         return CommandTrigger(method, getImplementationLoader())
     }
+
+    /**
+     * Registers a new trigger that runs whenever the client receives a velocity
+     * (knockback) packet. NOTE: for now this trigger only fires for entity
+     * motion packets; more packet types will be added later.
+     *
+     * Passes through two arguments:
+     * - The packet
+     * - The event, which can be cancelled with `cancel(event)`
+     *
+     * @param method The method to call when the event is fired
+     * @return The trigger for additional modification
+     */
+    fun registerPacketReceived(method: Any): RegularTrigger {
+        return RegularTrigger(method, TriggerType.PacketReceived, getImplementationLoader())
+    }
 }

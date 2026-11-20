@@ -57,6 +57,10 @@
     loadInstance("com.chattriggers.ctjs.utils.Config");
     loadClass("com.chattriggers.ctjs.Reference", "ChatTriggers");
 
+    global.cancel = function (event) {
+        event.setCanceled(true);
+    };
+
     global.register = (type, method) => TriggerRegister.register(type, method);
 
     // String prototypes
