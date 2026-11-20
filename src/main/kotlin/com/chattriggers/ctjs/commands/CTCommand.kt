@@ -5,7 +5,10 @@ import com.chattriggers.ctjs.minecraft.libs.ChatLib
 import com.chattriggers.ctjs.utils.Config
 import com.chattriggers.ctjs.utils.console.CTLog
 import com.mojang.brigadier.CommandDispatcher
+import com.chattriggers.ctjs.engine.module.ScriptRepo
+import com.chattriggers.ctjs.gui.ScriptGui
 import com.mojang.brigadier.arguments.IntegerArgumentType
+import com.mojang.brigadier.arguments.StringArgumentType
 import com.mojang.brigadier.builder.LiteralArgumentBuilder
 import com.mojang.brigadier.builder.RequiredArgumentBuilder
 import com.mojang.brigadier.context.CommandContext
@@ -33,6 +36,10 @@ object CTCommand {
                 .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("clear").executes { CTLog.clear(); ChatLib.chat("&7Console cleared"); 1 })
                 .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("log").executes { ChatLib.chat("&7Log file: &f${CTLog.file.absolutePath}"); 1 })
                 .then(eventsNode())
+                .then(guiNode())
+                .then(scriptsNode())
+                .then(importNode())
+                .then(repoNode())
         )
 
         dispatcher.register(LiteralArgumentBuilder.literal<FabricClientCommandSource>("ct").redirect(root))
@@ -47,6 +54,47 @@ object CTCommand {
             .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("off").executes { Config.logEvents = false; Config.eventsInChat = false; status(); 1 })
             .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("chat").executes { Config.eventsInChat = !Config.eventsInChat; status(); 1 })
     }
+
+    private fun guiNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("gui")
+        .executes { ScriptGui.open(); 1 }
+
+    private fun scriptsNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("scripts")
+        .executes {
+            ChatLib.chat("&7Loading script list from ${ScriptRepo.spec()}...")
+            ScriptRepo.listAsync { list, error ->
+                if (list == null) ChatLib.chat("&c[CT] Failed to load list: $error")
+                else if (list.isEmpty()) ChatLib.chat("&e[CT] No scripts found in scripts/ of ${ScriptRepo.spec()}")
+                else {
+                    ChatLib.chat("&b--- Available scripts (${list.size}) ---")
+                    list.forEach { ChatLib.chat((if (ScriptRepo.isInstalled(it)) "&a\u2714 &f" else "&7- &f") + it) }
+                }
+            }
+            1
+        }
+
+    private fun importNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("import")
+        .then(
+            RequiredArgumentBuilder.argument<FabricClientCommandSource, String>("name", StringArgumentType.word())
+                .suggests { _, builder ->
+                    ScriptRepo.cached.forEach(builder::suggest)
+                    builder.buildFuture()
+                }
+                .executes { ctx: CommandContext<FabricClientCommandSource> ->
+                    ScriptRepo.importAsync(StringArgumentType.getString(ctx, "name"))
+                    1
+                }
+        )
+
+    private fun repoNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("repo")
+        .executes { ChatLib.chat("&7Script repo: &f${ScriptRepo.spec()}"); 1 }
+        .then(
+            RequiredArgumentBuilder.argument<FabricClientCommandSource, String>("repo", StringArgumentType.greedyString())
+                .executes { ctx: CommandContext<FabricClientCommandSource> ->
+                    ScriptRepo.setSpec(StringArgumentType.getString(ctx, "repo"))
+                    ChatLib.chat("&7Script repo set to: &f${ScriptRepo.spec()}")
+                    1
+                }
+        )
 
     private fun showConsole(count: Int) {
         val lines = CTLog.last(count)
@@ -72,6 +120,10 @@ object CTCommand {
         &2/ct unload &7- Unloads all of the ChatTriggers modules
         &2/ct console [lines] &7- Shows the latest console lines in chat
         &2/ct clear &7- Clears the console
+        &2/ct gui &7- Opens the script manager GUI
+        &2/ct scripts &7- Lists scripts in the GitHub repo (scripts/<name>/)
+        &2/ct import <name> &7- Imports scripts/<name>/ from GitHub into modules
+        &2/ct repo [owner/repo[@branch]] &7- Shows or sets the GitHub repo
         &2/ct events [on|off|chat] &7- Logs damage, knockback, movement and more (chat = show live in chat)
         &2/ct log &7- Shows the log file path (config/ChatTriggers/ctjs.log)
     """.trimIndent()

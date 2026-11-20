@@ -2,6 +2,7 @@ package com.chattriggers.ctjs
 
 import com.chattriggers.ctjs.commands.CTCommand
 import com.chattriggers.ctjs.commands.Command
+import com.chattriggers.ctjs.gui.ScriptGui
 import com.chattriggers.ctjs.engine.module.ModuleManager
 import com.chattriggers.ctjs.triggers.TriggerType
 import com.chattriggers.ctjs.utils.Config
@@ -29,6 +30,7 @@ class CTJS : ClientModInitializer {
             } catch (e: Throwable) {
             }
 
+            ScriptGui.tick()
             ticksPassed++
             TriggerType.Tick.triggerAll(ticksPassed)
         }
