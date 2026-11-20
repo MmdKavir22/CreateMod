@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "sushitriggers",
+  "version": "${version}",
+  "name": "SushiTriggers",
+  "description": "SushiTriggers is a framework that allows for live scripting and client modification using JavaScript.",
+  "authors": ["FalseHonesty", "Ecolsson", "kerbybit"],
+  "contact": {
+    "homepage": "https://github.com/MmdKavir22/CreateMod"
+  },
+  "license": "MIT",
+  "icon": "assets/sushitriggers/icon.png",
+  "environment": "client",
+  "mixins": ["ctjs.mixins.json"],
+  "entrypoints": {
+    "client": ["com.sushitriggers.ctjs.CTJS"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}

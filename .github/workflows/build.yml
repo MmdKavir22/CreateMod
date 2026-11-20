@@ -32,7 +32,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: ChatTriggers Fabric 26.2 - build ${{ github.run_number }}
+          name: SushiTriggers Fabric 26.2 - build ${{ github.run_number }}
           body: Automatic build of commit ${{ github.sha }}
           files: ${{ env.JAR }}
           make_latest: true

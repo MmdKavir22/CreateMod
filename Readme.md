@@ -35,7 +35,7 @@
 1. Install [Fabric Loader](https://fabricmc.net/use/) for **Minecraft 26.2** and the **Fabric API**.
 2. Download the newest jar from the [Releases](../../releases/latest) page.
 3. Drop it into your `mods` folder and start the game.
-4. Scripts live in `config/ChatTriggers/modules/<module name>/`.
+4. Scripts live in `config/SushiTriggers/modules/<module name>/`.
 
 ## ⌨️ Commands
 
@@ -45,7 +45,7 @@
 | `/ct help` | Shows all commands |
 | `/ct load` · `reload` · `unload` | Load, reload or unload every script |
 | `/ct console [lines]` | Prints the latest console lines in chat |
-| `/ct dump` | Saves the current log to `config/ChatTriggers/dumps/` |
+| `/ct dump` | Saves the current log to `config/SushiTriggers/dumps/` |
 | `/ct record [key <F8\|R>]` | Starts/stops log recording, or changes the record key |
 | `/ct events [on\|off\|chat]` | Event log on/off, or show events live in chat |
 | `/ct scripts` | Lists scripts in your GitHub repo |
@@ -58,7 +58,7 @@
 A module is a folder with a `metadata.json` and your code:
 
 ```
-config/ChatTriggers/modules/hello/
+config/SushiTriggers/modules/hello/
 ├── metadata.json
 └── hello.js
 ```
