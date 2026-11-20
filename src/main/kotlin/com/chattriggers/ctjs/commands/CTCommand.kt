@@ -18,7 +18,8 @@ object CTCommand {
     fun register(dispatcher: CommandDispatcher<FabricClientCommandSource>) {
         val root = dispatcher.register(
             LiteralArgumentBuilder.literal<FabricClientCommandSource>("chattriggers")
-                .executes { ChatLib.chat(getUsage()); 1 }
+                .executes { ScriptGui.open(); 1 }
+                .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("help").executes { ChatLib.chat(getUsage()); 1 })
                 .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("load").executes { Reference.loadCT(); 1 })
                 .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("reload").executes { Reference.loadCT(); 1 })
                 .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("refresh").executes { Reference.loadCT(); 1 })
@@ -50,7 +51,11 @@ object CTCommand {
                 .then(uploadNode())
         )
 
-        dispatcher.register(LiteralArgumentBuilder.literal<FabricClientCommandSource>("ct").redirect(root))
+        dispatcher.register(
+            LiteralArgumentBuilder.literal<FabricClientCommandSource>("ct")
+                .executes { ScriptGui.open(); 1 }
+                .redirect(root)
+        )
     }
 
     private fun eventsNode(): LiteralArgumentBuilder<FabricClientCommandSource> {
@@ -161,6 +166,7 @@ object CTCommand {
 
     private fun getUsage() = """
         &b&m${"-".repeat(40)}
+        &2/ct &7- Opens the GUI
         &2/ct load &7- Reloads all of the ChatTriggers modules
         &2/ct unload &7- Unloads all of the ChatTriggers modules
         &2/ct console [lines] &7- Shows the latest console lines in chat

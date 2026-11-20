@@ -77,7 +77,7 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         }
 
         if (tab == Tab.EDITOR && editFile != null) {
-            buildEditor(x, w)
+            if (!buildEditorMulti(x, w)) buildEditor(x, w)
             return
         }
 
@@ -141,7 +141,7 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
     }
 
 
-    private val boxes = mutableMapOf<String, EditBox>()
+    private val boxes = mutableMapOf<String, Any>()
 
     private fun makeBox(x: Int, y: Int, w: Int, h: Int, value: String, hint: String): EditBox? {
         return try {
@@ -161,12 +161,14 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         }
     }
 
-    private fun boxValue(box: EditBox?): String? = Refl.call(box, "getValue") as? String
+    private fun boxValue(box: Any?): String? = Refl.call(box, "getValue") as? String
 
     private fun flush() {
         boxes.forEach { (id, box) ->
             val v = boxValue(box) ?: return@forEach
-            if (id == "line") {
+            if (id == "multi") {
+                editText = v
+            } else if (id == "line") {
                 if (editLine in editLines.indices && editLines[editLine] != v) {
                     editLines[editLine] = v
                     editDirty = true
@@ -211,15 +213,8 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
             }
             rebuild()
         })
-        addRenderableWidget(action("Upload", x + (quarter + 2) * 2, 32, quarter) {
-            if (save()) {
-                val module = moduleOf(file)
-                if (module == null) status = "File is not inside a module folder" else {
-                    status = "Uploading $module..."
-                    ScriptRepo.uploadAsync(module) { status = it; refresh() }
-                }
-            }
-            rebuild()
+        addRenderableWidget(action("Revert", x + (quarter + 2) * 2, 32, quarter) {
+            openFile(file)
         })
         addRenderableWidget(action("Close", x + (quarter + 2) * 3, 32, quarter) {
             flush()
@@ -290,6 +285,134 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         addRenderableWidget(action("Close GUI", x + w - 80, height - 24, 80) { show(null) })
     }
 
+
+    private fun makeMulti(x: Int, y: Int, w: Int, h: Int, value: String): Any? {
+        return try {
+            val cls = Class.forName("net.minecraft.client.gui.components.MultiLineEditBox")
+            val font = Refl.get(Minecraft.getInstance(), "font")
+            for (ctor in cls.constructors.sortedByDescending { it.parameterCount }) {
+                try {
+                    var ints = 0
+                    val args = arrayOfNulls<Any>(ctor.parameterCount)
+                    var ok = true
+                    ctor.parameterTypes.forEachIndexed { i, t ->
+                        args[i] = when {
+                            t == Int::class.javaPrimitiveType -> {
+                                ints++
+                                when (ints) { 1 -> x; 2 -> y; 3 -> w; 4 -> h; else -> -1 }
+                            }
+                            t == Boolean::class.javaPrimitiveType -> true
+                            t.name.endsWith("Component") -> Component.literal("")
+                            t.name.endsWith("Font") -> font
+                            else -> { ok = false; null }
+                        }
+                    }
+                    if (!ok) continue
+                    val box = ctor.newInstance(*args)
+                    Refl.callArg(box, "setCharacterLimit", 1000000)
+                    Refl.callArg(box, "setValue", value)
+                    return box
+                } catch (e: Throwable) {
+                }
+            }
+            null
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    private fun filesOf(file: File): List<File> {
+        val module = moduleOf(file) ?: return listOf(file)
+        val folder = File(ModuleManager.modulesFolder, module)
+        return folder.walk().filter { it.isFile && it.extension.lowercase() in editable }.sortedBy { it.path }.toList()
+    }
+
+    private fun buildEditorMulti(x: Int, w: Int): Boolean {
+        val file = editFile ?: return false
+        val sidebar = 120
+        val boxX = x + sidebar + 4
+        val boxW = w - sidebar - 4
+        val boxY = 56
+        val boxH = height - boxY - 54
+
+        val box = makeMulti(boxX, boxY, boxW, boxH, editText) ?: return false
+        boxes["multi"] = box
+        addRenderableWidget(box as net.minecraft.client.gui.components.AbstractWidget)
+
+        fun save(): Boolean {
+            flush()
+            return try {
+                file.writeText(editText)
+                editSaved = editText
+                true
+            } catch (e: Throwable) {
+                status = "Save failed: $e"
+                false
+            }
+        }
+
+        val quarter = (w - 6) / 4
+        addRenderableWidget(action("Save", x, 32, quarter) {
+            if (save()) status = "Saved ${file.name}"
+            rebuild()
+        })
+        addRenderableWidget(action("Save+Reload", x + quarter + 2, 32, quarter) {
+            if (save()) {
+                status = "Saved, reloading scripts..."
+                Reference.loadCT()
+            }
+            rebuild()
+        })
+        addRenderableWidget(action("Revert", x + (quarter + 2) * 2, 32, quarter) { openFile(file) })
+        addRenderableWidget(action("Close file", x + (quarter + 2) * 3, 32, quarter) {
+            flush()
+            editFile = null
+            rebuild()
+        })
+
+        val dirty = editText != editSaved
+        addRenderableWidget(label((if (dirty) "§e● " else "§a✔ ") + "§f${file.name}", x, boxY, sidebar))
+
+        val perSide = maxOf(2, (height - boxY - 54 - 22 * 3) / 22)
+        val files = filesOf(file)
+        files.take(perSide).forEachIndexed { i, f ->
+            val name = if (f == file) "§e▶ ${f.name}" else "§7  ${f.name}"
+            addRenderableWidget(action(name, x, boxY + 22 + i * 22, sidebar) {
+                flush()
+                if (editText != editSaved) {
+                    try { file.writeText(editText); editSaved = editText } catch (e: Throwable) {}
+                }
+                openFile(f)
+            })
+        }
+
+        val inputY = height - 54 - 44
+        val nb = makeBox(x, inputY, sidebar, 20, inputs["newFile"] ?: "", "new file")
+        if (nb != null) {
+            boxes["newFile"] = nb
+            addRenderableWidget(nb)
+        }
+        addRenderableWidget(action("+ Create file", x, inputY + 22, sidebar) {
+            flush()
+            val raw = (inputs["newFile"] ?: "").trim().replace(Regex("[^A-Za-z0-9_.-]"), "")
+            val module = moduleOf(file)
+            if (raw.isEmpty() || module == null) {
+                status = "Enter a file name"
+            } else {
+                val name = if (raw.contains('.')) raw else "$raw.js"
+                val f = File(File(ModuleManager.modulesFolder, module), name)
+                if (!f.exists()) f.writeText("")
+                inputs["newFile"] = ""
+                openFile(f)
+            }
+            rebuild()
+        })
+
+        addRenderableWidget(label(status, x, height - 48, w))
+        addRenderableWidget(action("Close GUI", x + w - 80, height - 24, 80) { show(null) })
+        return true
+    }
+
     private fun moduleOf(file: File): String? {
         val rel = try {
             file.canonicalFile.relativeTo(ModuleManager.modulesFolder.canonicalFile).path
@@ -306,6 +429,8 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         if (editLines.isEmpty()) editLines.add("")
         editLine = 0
         editDirty = false
+        editText = file.readText().replace("\r\n", "\n")
+        editSaved = editText
         status = "Opened ${file.name}"
         rebuild()
     }
@@ -334,17 +459,14 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
 
     private fun editorBrowserRows(): List<Row> {
         val rows = mutableListOf<Row>()
-        rows += header("EDITOR")
+        rows += header("CODE EDITOR (local files only)")
         rows += Row("", input = Input("newScript", "new script name", { createScript(it) }, "Create"))
-        rows += Row("§7Pick a file to edit. Upload sends the whole module to GitHub (needs /ct token).")
+        rows += Row("§7Pick a file to edit. Changes are saved only on your computer.")
 
         val folders = ModuleManager.modulesFolder.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name.lowercase() }
             ?: emptyList()
         folders.forEach { folder ->
-            rows += Row("§b${folder.name}", null, "Upload", {
-                status = "Uploading ${folder.name}..."
-                ScriptRepo.uploadAsync(folder.name) { status = it; refresh() }
-            })
+            rows += Row("§b▸ ${folder.name}")
             folder.walk().filter { it.isFile && it.extension.lowercase() in editable }
                 .sortedBy { it.path }.forEach { f ->
                     val rel = f.relativeTo(folder).path
@@ -636,6 +758,8 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
         private var editLines = mutableListOf("")
         private var editLine = 0
         private var editDirty = false
+        private var editText = ""
+        private var editSaved = ""
         private val expanded = mutableSetOf<String>()
 
         fun open() {

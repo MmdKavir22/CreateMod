@@ -40,7 +40,7 @@ object ActivityLog {
 
     val categories = listOf(
         "health", "knockback", "movement", "items", "inventory", "container",
-        "clicks", "keys", "screens", "target", "effects", "world"
+        "clicks", "keys", "screens", "target", "effects", "blocks", "world"
     )
 
     val categoryHelp = mapOf(
@@ -55,6 +55,7 @@ object ActivityLog {
         "screens" to "screens opened and closed",
         "target" to "entity under the crosshair",
         "effects" to "potion effects gained or lost",
+        "blocks" to "blocks broken, placed or changed near you, block you look at",
         "world" to "join, leave, dimension change, xp level"
     )
 
@@ -73,6 +74,7 @@ object ActivityLog {
         text.startsWith("SCREEN") -> "screens"
         text.startsWith("TARGET") -> "target"
         text.startsWith("EFFECT") -> "effects"
+        text.startsWith("BLOCK") -> "blocks"
         else -> "world"
     }
 
@@ -187,6 +189,68 @@ object ActivityLog {
         safe { trackContainer(player) }
         safe { trackTarget(mc) }
         safe { trackXpAndEffects(player) }
+        safe { trackBlocks(mc, player, level) }
+    }
+
+    private var blockMap = HashMap<Long, Any?>()
+    private var blockTick = 0
+    private var lastLookedBlock: String? = null
+
+    private fun blockName(state: Any?): String {
+        val id = Refl.call(Refl.call(state, "getBlock"), "getDescriptionId")?.toString() ?: return "?"
+        return id.removePrefix("block.").replace("minecraft.", "")
+    }
+
+    private fun isAir(state: Any?) = Refl.call(state, "isAir") == true
+
+    private fun trackBlocks(mc: Minecraft, player: Any, level: Any?) {
+        if (level !is net.minecraft.world.level.BlockGetter) return
+
+        val hit = Refl.get(mc, "hitResult")
+        var looked: String? = null
+        if (hit != null && hit.javaClass.simpleName == "BlockHitResult") {
+            val pos = Refl.call(hit, "getBlockPos") as? net.minecraft.core.BlockPos
+            if (pos != null) {
+                looked = blockName(level.getBlockState(pos)) + " at ${pos.x}, ${pos.y}, ${pos.z}"
+            }
+        }
+        if (looked != lastLookedBlock) {
+            if (looked != null) event("BLOCK looking at: $looked")
+            lastLookedBlock = looked
+        }
+
+        if (++blockTick % 2 != 0) return
+
+        val px = Math.floor(Refl.num(player, "x") ?: return).toInt()
+        val py = Math.floor(Refl.num(player, "y") ?: return).toInt()
+        val pz = Math.floor(Refl.num(player, "z") ?: return).toInt()
+        val radius = 4
+
+        val fresh = HashMap<Long, Any?>()
+        val changes = ArrayList<String>()
+        val pos = net.minecraft.core.BlockPos.MutableBlockPos()
+
+        for (x in px - radius..px + radius) for (y in py - radius..py + radius) for (z in pz - radius..pz + radius) {
+            pos.set(x, y, z)
+            val state = level.getBlockState(pos)
+            val key = net.minecraft.core.BlockPos.asLong(x, y, z)
+            fresh[key] = state
+
+            if (joinGrace > 0 || !blockMap.containsKey(key)) continue
+            val old = blockMap[key]
+            if (old !== state) {
+                val where = "($x, $y, $z)"
+                changes += when {
+                    isAir(state) -> "BLOCK removed ${blockName(old)} at $where"
+                    isAir(old) -> "BLOCK placed ${blockName(state)} at $where"
+                    else -> "BLOCK changed ${blockName(old)} -> ${blockName(state)} at $where"
+                }
+            }
+        }
+        blockMap = fresh
+
+        if (changes.size > 40) event("BLOCK bulk change: ${changes.size} blocks (chunk load / explosion)")
+        else changes.forEach { event(it) }
     }
 
     private fun trackMouse(mc: Minecraft, screenName: String?) {
