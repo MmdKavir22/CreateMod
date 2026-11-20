@@ -1,9 +1,11 @@
 // ChatLogger - logs all chat messages to files (per server, per day)
-// Command: /chatlog            -> toggle on/off
-//          /chatlog gui        -> settings screen
-//          /chatlog status     -> show current settings
-//          /chatlog debug      -> print screen-related methods to the log
-//          /chatlog set <key> <value>  -> fallback if the GUI doesn't work
+// /chatlog            -> opens the settings GUI
+// /chatlog gui        -> opens the settings GUI
+// /chatlog toggle     -> logging on/off  (also: on / off)
+// /chatlog status     -> show current settings + log path
+// /chatlog test       -> write a test line and report the file path
+// /chatlog debug      -> print chat/screen internals to the log
+// /chatlog set <key> <value>
 
 var Minecraft = Packages.net.minecraft.client.Minecraft;
 var Component = Packages.net.minecraft.network.chat.Component;
@@ -24,6 +26,8 @@ var DEFAULTS = {
     saveDir: ""
 };
 
+var SUBCOMMANDS = ["gui", "toggle", "on", "off", "status", "test", "debug", "set"];
+
 var cfg = {};
 var k;
 for (k in DEFAULTS) {
@@ -38,7 +42,8 @@ var lastHash = 0;
 var chatList = null;
 var chatHash = 0;
 var errCount = {};
-var SCREEN_CLASS = null; // java.lang.Class of Screen (taken from an instance)
+var listFailShown = false;
+var SCREEN_CLASS = null;
 
 // ---------------------------------------------------------------- helpers
 
@@ -111,7 +116,11 @@ function idHash(o) {
 function gameDir() {
     try {
         var m = mc();
-        if (m && m.gameDirectory) return m.gameDirectory;
+        if (m && m.gameDirectory) {
+            var g = m.gameDirectory;
+            if (g instanceof Packages.java.nio.file.Path) g = g.toFile();
+            return g;
+        }
     } catch (e) {}
     return new JFile(String(Packages.java.lang.System.getProperty("user.dir")));
 }
@@ -197,6 +206,26 @@ function serverInfo() {
 
 // ---------------------------------------------------------------- chat reading
 
+function findListField(chat) {
+    var cls = chat.getClass();
+    var fields = cls.getDeclaredFields();
+    var i;
+    var gt;
+    // 1) by name
+    for (i = 0; i < fields.length; i++) {
+        if (String(fields[i].getName()) === "allMessages") return fields[i];
+    }
+    // 2) by generic type: List<GuiMessage> (not List<GuiMessage.Line>)
+    for (i = 0; i < fields.length; i++) {
+        gt = String(fields[i].getGenericType().toString());
+        if (gt.indexOf("List") !== -1 && gt.indexOf("GuiMessage") !== -1 &&
+            gt.indexOf("GuiMessage$Line") === -1) {
+            return fields[i];
+        }
+    }
+    return null;
+}
+
 function getChatList() {
     var m = mc();
     if (!m || !m.gui) return null;
@@ -205,30 +234,19 @@ function getChatList() {
     var h = idHash(chat);
     if (chatList !== null && h === chatHash) return chatList;
 
-    var cls = chat.getClass();
     var list = null;
-    try {
-        var f = cls.getDeclaredField("allMessages");
+    var f = findListField(chat);
+    if (f !== null) {
         f.setAccessible(true);
         list = f.get(chat);
-    } catch (e) {
-        // fallback: find a java.util.List field whose elements are GuiMessage
-        var fields = cls.getDeclaredFields();
-        var i;
-        for (i = 0; i < fields.length; i++) {
-            try {
-                fields[i].setAccessible(true);
-                var cand = fields[i].get(chat);
-                if (cand !== null && cand instanceof Packages.java.util.List &&
-                    cand.size() > 0 &&
-                    String(cand.get(0).getClass().getSimpleName()) === "GuiMessage") {
-                    list = cand;
-                    break;
-                }
-            } catch (e2) {}
-        }
     }
-    if (list === null || list === undefined) return null;
+    if (list === null || list === undefined) {
+        if (!listFailShown) {
+            listFailShown = true;
+            say("&c[ChatLogger] could not find the chat message list. Run /chatlog debug and send me the log.");
+        }
+        return null;
+    }
     chatList = list;
     chatHash = h;
     return chatList;
@@ -244,7 +262,7 @@ function msgText(m) {
 
 function writeBatch(texts) {
     var info = serverInfo();
-    if (info.single && !cfg.logSingleplayer) return;
+    if (info.single && !cfg.logSingleplayer) return null;
     var d = new Date();
     var dir = baseDir();
     if (cfg.perServer) dir = new JFile(dir, info.folder);
@@ -255,7 +273,9 @@ function writeBatch(texts) {
     for (i = 0; i < texts.length; i++) {
         lines.push(p + String(texts[i]).replace(/\r?\n/g, " \u23CE "));
     }
-    writeText(new JFile(dir, name), lines.join("\n") + "\n", true);
+    var file = new JFile(dir, name);
+    writeText(file, lines.join("\n") + "\n", true);
+    return file;
 }
 
 function pollChat() {
@@ -394,7 +414,6 @@ function openSettings() {
         }
     }, Component.literal("Chat Logger Settings"));
 
-    // real Screen class, taken from the instance (superclass of the adapter)
     SCREEN_CLASS = screen.getClass().getSuperclass();
 
     showScreen(m, screen);
@@ -474,63 +493,111 @@ function parseBool(s) {
     return s === "on" || s === "true" || s === "1" || s === "yes";
 }
 
-register("command", function () {
+function setEnabled(v) {
+    cfg.enabled = v;
+    saveConfig();
+    say("&a[ChatLogger] " + (cfg.enabled ? "&aON" : "&cOFF"));
+}
+
+function runCommand(a) {
+    if (a.length === 0) {
+        pendingOpen = true; // opens the GUI on the next tick
+        return;
+    }
+    var sub = a[0].toLowerCase();
+    if (sub === "gui" || sub === "settings") {
+        pendingOpen = true;
+    } else if (sub === "toggle") {
+        setEnabled(!cfg.enabled);
+    } else if (sub === "on") {
+        setEnabled(true);
+    } else if (sub === "off") {
+        setEnabled(false);
+    } else if (sub === "status") {
+        say("&7enabled=" + cfg.enabled + " time=" + cfg.showTime + " date=" + cfg.showDate +
+            " 24h=" + cfg.use24h + " sec=" + cfg.showSeconds + " perServer=" + cfg.perServer +
+            " perDay=" + cfg.perDay + " single=" + cfg.logSingleplayer);
+        say("&7dir=" + String(baseDir().getAbsolutePath()));
+    } else if (sub === "test") {
+        var f = writeBatch(["ChatLogger test line"]);
+        if (f === null) {
+            say("&c[ChatLogger] nothing written (singleplayer logging is off)");
+        } else {
+            say("&a[ChatLogger] wrote test line to: &7" + String(f.getAbsolutePath()) +
+                " &7(exists=" + f.exists() + ")");
+        }
+    } else if (sub === "debug") {
+        var j;
+        var m = mc();
+        print("[ChatLogger] gameDir=" + String(gameDir().getAbsolutePath()));
+        print("[ChatLogger] baseDir=" + String(baseDir().getAbsolutePath()));
+        if (m && m.gui) {
+            var chat = m.gui.getChat();
+            var cf = chat.getClass().getDeclaredFields();
+            for (j = 0; j < cf.length; j++) {
+                print("[ChatLogger] ChatField: " + String(cf[j].getName()) + " : " +
+                    String(cf[j].getGenericType().toString()));
+            }
+        } else {
+            print("[ChatLogger] m.gui is not available");
+        }
+        var ms = m.getClass().getDeclaredMethods();
+        for (j = 0; j < ms.length; j++) {
+            if (String(ms[j].getName()).toLowerCase().indexOf("screen") !== -1) {
+                print("[ChatLogger] MC: " + String(ms[j].toString()));
+            }
+        }
+        if (SCREEN_CLASS !== null) {
+            var sm = SCREEN_CLASS.getDeclaredMethods();
+            for (j = 0; j < sm.length; j++) {
+                if (String(sm[j].getName()).toLowerCase().indexOf("widget") !== -1) {
+                    print("[ChatLogger] Screen: " + String(sm[j].toString()));
+                }
+            }
+        }
+        say("&7debug info printed to the log");
+    } else if (sub === "set" && a.length >= 3) {
+        var key = a[1];
+        if (!DEFAULTS.hasOwnProperty(key)) {
+            say("&c[ChatLogger] unknown key. keys: " + Object.keys(DEFAULTS).join(", "));
+            return;
+        }
+        if (typeof DEFAULTS[key] === "boolean") {
+            cfg[key] = parseBool(a[2]);
+        } else {
+            cfg[key] = a.slice(2).join(" ");
+        }
+        saveConfig();
+        say("&a[ChatLogger] " + key + " = " + cfg[key]);
+    } else {
+        say("&7/chatlog [" + SUBCOMMANDS.join(" | ") + "]");
+    }
+}
+
+var cmdTrigger = register("command", function () {
     var a = [];
     var i;
     for (i = 0; i < arguments.length; i++) a.push(String(arguments[i]));
-
     try {
-        if (a.length === 0) {
-            cfg.enabled = !cfg.enabled;
-            saveConfig();
-            say("&a[ChatLogger] " + (cfg.enabled ? "&aON" : "&cOFF"));
-            return;
-        }
-        var sub = a[0].toLowerCase();
-        if (sub === "gui" || sub === "settings") {
-            pendingOpen = true;
-        } else if (sub === "status") {
-            say("&7enabled=" + cfg.enabled + " time=" + cfg.showTime + " date=" + cfg.showDate +
-                " 24h=" + cfg.use24h + " sec=" + cfg.showSeconds + " perServer=" + cfg.perServer +
-                " perDay=" + cfg.perDay + " single=" + cfg.logSingleplayer);
-            say("&7dir=" + String(baseDir().getAbsolutePath()));
-        } else if (sub === "debug") {
-            var found = 0;
-            var j;
-            var ms = mc().getClass().getDeclaredMethods();
-            for (j = 0; j < ms.length; j++) {
-                if (String(ms[j].getName()).toLowerCase().indexOf("screen") !== -1) {
-                    print("[ChatLogger] MC: " + String(ms[j].toString()));
-                    found++;
-                }
-            }
-            if (SCREEN_CLASS !== null) {
-                var sm = SCREEN_CLASS.getDeclaredMethods();
-                for (j = 0; j < sm.length; j++) {
-                    if (String(sm[j].getName()).toLowerCase().indexOf("widget") !== -1) {
-                        print("[ChatLogger] Screen: " + String(sm[j].toString()));
-                        found++;
-                    }
-                }
-            }
-            say("&7" + found + " methods printed to the log");
-        } else if (sub === "set" && a.length >= 3) {
-            var key = a[1];
-            if (!DEFAULTS.hasOwnProperty(key)) {
-                say("&c[ChatLogger] unknown key. keys: " + Object.keys(DEFAULTS).join(", "));
-                return;
-            }
-            if (typeof DEFAULTS[key] === "boolean") {
-                cfg[key] = parseBool(a[2]);
-            } else {
-                cfg[key] = a.slice(2).join(" ");
-            }
-            saveConfig();
-            say("&a[ChatLogger] " + key + " = " + cfg[key]);
-        } else {
-            say("&7/chatlog | gui | status | debug | set <key> <value>");
-        }
+        runCommand(a);
     } catch (e) {
         warn("command", e);
+        say("&c[ChatLogger] error: " + String(e));
     }
-}).setName("chatlog");
+});
+cmdTrigger.setName("chatlog");
+
+// tab completion (guess: depends on the ChatTriggers version)
+try {
+    if (typeof cmdTrigger.setTabCompletions === "function") {
+        try {
+            cmdTrigger.setTabCompletions.apply(cmdTrigger, SUBCOMMANDS);
+        } catch (e1) {
+            cmdTrigger.setTabCompletions(SUBCOMMANDS);
+        }
+    } else {
+        print("[ChatLogger] setTabCompletions not available in this ChatTriggers version");
+    }
+} catch (e2) {
+    warn("tabCompletions", e2);
+}
