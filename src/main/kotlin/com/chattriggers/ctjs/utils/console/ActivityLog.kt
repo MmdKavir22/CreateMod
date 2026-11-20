@@ -26,7 +26,22 @@ object ActivityLog {
     private var watchKnockback = 0
     private var dead = false
 
+    val categories = listOf("health", "knockback", "movement", "items", "screens", "world")
+
+    fun categoryOf(text: String): String = when {
+        text.startsWith("DAMAGE") || text.startsWith("HEAL") || text.startsWith("HURT") ||
+                text.startsWith("ABSORPTION") || text.startsWith("FOOD") || text.startsWith("DEAD") ||
+                text.startsWith("ON FIRE") || text.startsWith("FIRE") -> "health"
+        text.startsWith("KNOCKBACK") || text.startsWith("VELOCITY") -> "knockback"
+        text.startsWith("JUMP") || text.startsWith("SPRINT") || text.startsWith("SNEAK") ||
+                text.startsWith("TELEPORT") -> "movement"
+        text.startsWith("HELD") -> "items"
+        text.startsWith("SCREEN") -> "screens"
+        else -> "world"
+    }
+
     fun event(text: String) {
+        if (categoryOf(text) in Config.disabledEventCategories) return
         if (Config.logEvents) CTLog.add(LogType.INFO, "[EVENT] $text")
         if (Config.eventsInChat) ChatLib.chat("&8[EVENT] &7$text")
     }

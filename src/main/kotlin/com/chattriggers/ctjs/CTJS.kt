@@ -19,6 +19,8 @@ import kotlin.concurrent.thread
 
 class CTJS : ClientModInitializer {
     override fun onInitializeClient() {
+        Config.load()
+
         ClientCommandRegistrationCallback.EVENT.register { dispatcher, _ ->
             Command.attach(dispatcher)
             CTCommand.register(dispatcher)

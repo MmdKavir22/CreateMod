@@ -63,6 +63,11 @@ object JSLoader : ILoader {
 
     private fun newTriggerSet() = ConcurrentSkipListSet<Trigger>()
 
+    fun triggerCounts(): Map<String, Int> = triggers.entries
+        .filter { it.value.isNotEmpty() }
+        .associate { it.key.name to it.value.size }
+        .toSortedMap()
+
     override fun setup(jars: List<URL>) {
         instanceContexts(jars)
     }
