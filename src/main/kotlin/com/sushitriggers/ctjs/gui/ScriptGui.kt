@@ -117,9 +117,9 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
     private fun build() {
         val w = minOf(width - 20, 470)
         boxes.clear()
+        val x = (width - w) / 2
         panelX = x
         panelW = w
-        val x = (width - w) / 2
 
         val tabs = Tab.values()
         val gap = 2
