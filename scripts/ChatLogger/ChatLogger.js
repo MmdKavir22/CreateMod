@@ -10,7 +10,6 @@ var Component = Packages.net.minecraft.network.chat.Component;
 var Button = Packages.net.minecraft.client.gui.components.Button;
 var EditBox = Packages.net.minecraft.client.gui.components.EditBox;
 var ScreenClass = Packages.net.minecraft.client.gui.screens.Screen;
-var ChatComponentClass = Packages.net.minecraft.client.gui.components.ChatComponent;
 var JFile = Packages.java.io.File;
 
 var DEFAULTS = {
@@ -39,6 +38,7 @@ var lastHash = 0;
 var chatList = null;
 var chatHash = 0;
 var errCount = {};
+var SCREEN_CLASS = null; // java.lang.Class of Screen (taken from an instance)
 
 // ---------------------------------------------------------------- helpers
 
@@ -205,26 +205,25 @@ function getChatList() {
     var h = idHash(chat);
     if (chatList !== null && h === chatHash) return chatList;
 
-    var cls = ChatComponentClass["class"];
+    var cls = chat.getClass();
     var list = null;
     try {
         var f = cls.getDeclaredField("allMessages");
         f.setAccessible(true);
         list = f.get(chat);
     } catch (e) {
-        // fallback: find a List field whose elements are GuiMessage
+        // fallback: find a java.util.List field whose elements are GuiMessage
         var fields = cls.getDeclaredFields();
         var i;
         for (i = 0; i < fields.length; i++) {
             try {
-                if (Packages.java.util.List["class"].isAssignableFrom(fields[i].getType())) {
-                    fields[i].setAccessible(true);
-                    var cand = fields[i].get(chat);
-                    if (cand !== null && cand.size() > 0 &&
-                        String(cand.get(0).getClass().getSimpleName()) === "GuiMessage") {
-                        list = cand;
-                        break;
-                    }
+                fields[i].setAccessible(true);
+                var cand = fields[i].get(chat);
+                if (cand !== null && cand instanceof Packages.java.util.List &&
+                    cand.size() > 0 &&
+                    String(cand.get(0).getClass().getSimpleName()) === "GuiMessage") {
+                    list = cand;
+                    break;
                 }
             } catch (e2) {}
         }
@@ -303,20 +302,18 @@ function pollChat() {
 // ---------------------------------------------------------------- reflection helpers
 
 function callMethod(obj, method, arg) {
-    var arr = Packages.java.lang.reflect.Array.newInstance(Packages.java.lang.Object["class"], 1);
-    arr[0] = arg;
     method.setAccessible(true);
-    return method.invoke(obj, arr);
+    return method.invoke(obj, [arg]);
 }
 
-function findScreenSetter() {
-    var ms = Minecraft["class"].getDeclaredMethods();
-    var screenCls = ScreenClass["class"];
+function findScreenSetter(m) {
+    if (SCREEN_CLASS === null) return null;
+    var ms = m.getClass().getDeclaredMethods();
     var i;
     for (i = 0; i < ms.length; i++) {
         var n = String(ms[i].getName());
         if (ms[i].getParameterCount() === 1 &&
-            ms[i].getParameterTypes()[0] === screenCls &&
+            ms[i].getParameterTypes()[0].isAssignableFrom(SCREEN_CLASS) &&
             n.toLowerCase().indexOf("screen") !== -1 &&
             String(ms[i].getReturnType().getName()) === "void") {
             return ms[i];
@@ -334,13 +331,13 @@ function showScreen(m, screen) {
             return;
         }
     }
-    var setter = findScreenSetter();
+    var setter = findScreenSetter(m);
     if (setter === null) throw "no screen setter found (use /chatlog debug)";
     callMethod(m, setter, screen);
 }
 
 function addWidget(screen, w) {
-    var ms = ScreenClass["class"].getDeclaredMethods();
+    var ms = SCREEN_CLASS.getDeclaredMethods();
     var i;
     for (i = 0; i < ms.length; i++) {
         if (String(ms[i].getName()) === "addRenderableWidget" && ms[i].getParameterCount() === 1) {
@@ -396,6 +393,9 @@ function openSettings() {
             }
         }
     }, Component.literal("Chat Logger Settings"));
+
+    // real Screen class, taken from the instance (superclass of the adapter)
+    SCREEN_CLASS = screen.getClass().getSuperclass();
 
     showScreen(m, screen);
 
@@ -495,20 +495,22 @@ register("command", function () {
                 " perDay=" + cfg.perDay + " single=" + cfg.logSingleplayer);
             say("&7dir=" + String(baseDir().getAbsolutePath()));
         } else if (sub === "debug") {
-            var ms = Minecraft["class"].getDeclaredMethods();
-            var j;
             var found = 0;
+            var j;
+            var ms = mc().getClass().getDeclaredMethods();
             for (j = 0; j < ms.length; j++) {
                 if (String(ms[j].getName()).toLowerCase().indexOf("screen") !== -1) {
-                    print("[ChatLogger] " + String(ms[j].toString()));
+                    print("[ChatLogger] MC: " + String(ms[j].toString()));
                     found++;
                 }
             }
-            var sm = ScreenClass["class"].getDeclaredMethods();
-            for (j = 0; j < sm.length; j++) {
-                if (String(sm[j].getName()).toLowerCase().indexOf("widget") !== -1) {
-                    print("[ChatLogger] Screen: " + String(sm[j].toString()));
-                    found++;
+            if (SCREEN_CLASS !== null) {
+                var sm = SCREEN_CLASS.getDeclaredMethods();
+                for (j = 0; j < sm.length; j++) {
+                    if (String(sm[j].getName()).toLowerCase().indexOf("widget") !== -1) {
+                        print("[ChatLogger] Screen: " + String(sm[j].toString()));
+                        found++;
+                    }
                 }
             }
             say("&7" + found + " methods printed to the log");
