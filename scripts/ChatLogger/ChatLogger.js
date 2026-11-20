@@ -1,10 +1,11 @@
 // ChatLogger - logs all chat messages to files (per server, per day)
 // /chatlog            -> opens the settings GUI
 // /chatlog gui        -> opens the settings GUI
+// /chatlog folder     -> opens the log folder
 // /chatlog toggle     -> logging on/off  (also: on / off)
-// /chatlog status     -> show current settings + log path
+// /chatlog status     -> settings + log path + counters
 // /chatlog test       -> write a test line and report the file path
-// /chatlog debug      -> print chat/screen internals to the log
+// /chatlog debug      -> print internals to the game log
 // /chatlog set <key> <value>
 
 var Minecraft = Packages.net.minecraft.client.Minecraft;
@@ -13,6 +14,9 @@ var Button = Packages.net.minecraft.client.gui.components.Button;
 var EditBox = Packages.net.minecraft.client.gui.components.EditBox;
 var ScreenClass = Packages.net.minecraft.client.gui.screens.Screen;
 var JFile = Packages.java.io.File;
+var JArray = Packages.java.lang.reflect.Array;
+var OBJ_CLASS = Packages.java.lang.Class.forName("java.lang.Object");
+var STR_CLASS = Packages.java.lang.Class.forName("java.lang.String");
 
 var DEFAULTS = {
     enabled: true,
@@ -26,7 +30,7 @@ var DEFAULTS = {
     saveDir: ""
 };
 
-var SUBCOMMANDS = ["gui", "toggle", "on", "off", "status", "test", "debug", "set"];
+var SUBCOMMANDS = ["gui", "folder", "toggle", "on", "off", "status", "test", "debug", "set"];
 
 var cfg = {};
 var k;
@@ -39,10 +43,13 @@ var pendingLoadMsg = true;
 var needBaseline = true;
 var lastRef = null;
 var lastHash = 0;
+var chatObj = null;
 var chatList = null;
 var chatHash = 0;
 var errCount = {};
-var listFailShown = false;
+var lastFail = "";
+var lastReason = "";
+var written = 0;
 var SCREEN_CLASS = null;
 
 // ---------------------------------------------------------------- helpers
@@ -68,7 +75,23 @@ function warn(where, e) {
     errCount[key] = (errCount[key] || 0) + 1;
     if (errCount[key] <= 2) {
         print("[ChatLogger] error in " + where + ": " + String(e));
+        say("&c[ChatLogger] error in " + where + ": " + String(e));
     }
+}
+
+function failOnce(msg) {
+    if (msg !== lastFail) {
+        lastFail = msg;
+        print("[ChatLogger] " + msg);
+        say("&c[ChatLogger] " + msg + " - run /chatlog debug");
+    }
+}
+
+function objArr(items) {
+    var a = JArray.newInstance(OBJ_CLASS, items.length);
+    var i;
+    for (i = 0; i < items.length; i++) a[i] = items[i];
+    return a;
 }
 
 function pad(n, l) {
@@ -113,13 +136,32 @@ function idHash(o) {
     return Packages.java.lang.System.identityHashCode(o);
 }
 
+function getFieldValue(obj, name) {
+    try {
+        var v = obj[name];
+        if (v !== undefined && v !== null && typeof v !== "function") return v;
+    } catch (e) {}
+    var c = obj.getClass();
+    while (c !== null) {
+        try {
+            var f = c.getDeclaredField(name);
+            f.setAccessible(true);
+            return f.get(obj);
+        } catch (e2) {}
+        c = c.getSuperclass();
+    }
+    return null;
+}
+
 function gameDir() {
     try {
         var m = mc();
-        if (m && m.gameDirectory) {
-            var g = m.gameDirectory;
-            if (g instanceof Packages.java.nio.file.Path) g = g.toFile();
-            return g;
+        if (m) {
+            var g = getFieldValue(m, "gameDirectory");
+            if (g !== null) {
+                if (g instanceof Packages.java.nio.file.Path) g = g.toFile();
+                return g;
+            }
         }
     } catch (e) {}
     return new JFile(String(Packages.java.lang.System.getProperty("user.dir")));
@@ -127,6 +169,7 @@ function gameDir() {
 
 function baseDir() {
     var p = String(cfg.saveDir || "").replace(/^\s+|\s+$/g, "");
+    p = p.replace(/^"+|"+$/g, "");
     if (p === "") return new JFile(gameDir(), "chatlogs");
     var f = new JFile(p);
     if (f.isAbsolute()) return f;
@@ -197,8 +240,9 @@ function serverInfo() {
     try {
         var sd = m.getCurrentServer();
         if (sd !== null && sd !== undefined) {
-            var id = (typeof sd.ip !== "undefined") ? sd.ip : sd.name;
-            return { single: false, folder: sanitize(id) };
+            var id = getFieldValue(sd, "ip");
+            if (id === null) id = getFieldValue(sd, "name");
+            if (id !== null) return { single: false, folder: sanitize(id) };
         }
     } catch (e3) {}
     return { single: false, folder: "unknown" };
@@ -206,45 +250,104 @@ function serverInfo() {
 
 // ---------------------------------------------------------------- chat reading
 
-function findListField(chat) {
-    var cls = chat.getClass();
-    var fields = cls.getDeclaredFields();
+function findChat(m) {
+    if (chatObj !== null) return chatObj;
+    var gui = getFieldValue(m, "gui");
+    var i;
+    if (gui === null) {
+        var fs = m.getClass().getDeclaredFields();
+        for (i = 0; i < fs.length; i++) {
+            if (String(fs[i].getType().getSimpleName()) === "Gui") {
+                fs[i].setAccessible(true);
+                gui = fs[i].get(m);
+                break;
+            }
+        }
+    }
+    if (gui === null) {
+        lastReason = "Minecraft.gui not found";
+        return null;
+    }
+    var chat = null;
+    try {
+        if (typeof gui.getChat === "function") chat = gui.getChat();
+    } catch (e) {}
+    if (chat === null || chat === undefined) {
+        var ms = gui.getClass().getDeclaredMethods();
+        for (i = 0; i < ms.length; i++) {
+            if (ms[i].getParameterCount() === 0 &&
+                String(ms[i].getReturnType().getSimpleName()) === "ChatComponent") {
+                ms[i].setAccessible(true);
+                chat = ms[i].invoke(gui, objArr([]));
+                break;
+            }
+        }
+    }
+    if (chat === null || chat === undefined) {
+        var gf = gui.getClass().getDeclaredFields();
+        for (i = 0; i < gf.length; i++) {
+            if (String(gf[i].getType().getSimpleName()) === "ChatComponent") {
+                gf[i].setAccessible(true);
+                chat = gf[i].get(gui);
+                break;
+            }
+        }
+    }
+    if (chat === null || chat === undefined) {
+        lastReason = "ChatComponent not found in Gui";
+        return null;
+    }
+    chatObj = chat;
+    return chatObj;
+}
+
+function findList(chat) {
+    var fields = chat.getClass().getDeclaredFields();
     var i;
     var gt;
     // 1) by name
     for (i = 0; i < fields.length; i++) {
-        if (String(fields[i].getName()) === "allMessages") return fields[i];
+        if (String(fields[i].getName()) === "allMessages") {
+            fields[i].setAccessible(true);
+            return fields[i].get(chat);
+        }
     }
-    // 2) by generic type: List<GuiMessage> (not List<GuiMessage.Line>)
+    // 2) by generic type List<GuiMessage>
     for (i = 0; i < fields.length; i++) {
         gt = String(fields[i].getGenericType().toString());
         if (gt.indexOf("List") !== -1 && gt.indexOf("GuiMessage") !== -1 &&
-            gt.indexOf("GuiMessage$Line") === -1) {
-            return fields[i];
+            gt.indexOf("Line") === -1) {
+            fields[i].setAccessible(true);
+            return fields[i].get(chat);
         }
+    }
+    // 3) by value: a List whose first element is a GuiMessage
+    for (i = 0; i < fields.length; i++) {
+        try {
+            fields[i].setAccessible(true);
+            var v = fields[i].get(chat);
+            if (v !== null && v instanceof Packages.java.util.List && v.size() > 0 &&
+                String(v.get(0).getClass().getSimpleName()) === "GuiMessage") {
+                return v;
+            }
+        } catch (e) {}
     }
     return null;
 }
 
 function getChatList() {
     var m = mc();
-    if (!m || !m.gui) return null;
-    var chat = m.gui.getChat();
-    if (chat === null || chat === undefined) return null;
+    if (!m) return null;
+    var chat = findChat(m);
+    if (chat === null) {
+        failOnce("chat component not found: " + lastReason);
+        return null;
+    }
     var h = idHash(chat);
     if (chatList !== null && h === chatHash) return chatList;
-
-    var list = null;
-    var f = findListField(chat);
-    if (f !== null) {
-        f.setAccessible(true);
-        list = f.get(chat);
-    }
+    var list = findList(chat);
     if (list === null || list === undefined) {
-        if (!listFailShown) {
-            listFailShown = true;
-            say("&c[ChatLogger] could not find the chat message list. Run /chatlog debug and send me the log.");
-        }
+        failOnce("chat message list not found");
         return null;
     }
     chatList = list;
@@ -253,10 +356,24 @@ function getChatList() {
 }
 
 function msgText(m) {
+    var i;
     try {
-        var c = (typeof m.content === "function") ? m.content() : m.content;
-        if (c !== null && c !== undefined) return String(c.getString());
+        if (typeof m.content === "function") {
+            var c = m.content();
+            if (c !== null && c !== undefined) return String(c.getString());
+        }
     } catch (e) {}
+    try {
+        var ms = m.getClass().getDeclaredMethods();
+        for (i = 0; i < ms.length; i++) {
+            if (ms[i].getParameterCount() === 0 &&
+                String(ms[i].getReturnType().getSimpleName()) === "Component") {
+                ms[i].setAccessible(true);
+                var c2 = ms[i].invoke(m, objArr([]));
+                if (c2 !== null && c2 !== undefined) return String(c2.getString());
+            }
+        }
+    } catch (e2) {}
     return String(m);
 }
 
@@ -275,6 +392,7 @@ function writeBatch(texts) {
     }
     var file = new JFile(dir, name);
     writeText(file, lines.join("\n") + "\n", true);
+    written += texts.length;
     return file;
 }
 
@@ -323,7 +441,7 @@ function pollChat() {
 
 function callMethod(obj, method, arg) {
     method.setAccessible(true);
-    return method.invoke(obj, [arg]);
+    return method.invoke(obj, objArr([arg]));
 }
 
 function findScreenSetter(m) {
@@ -366,6 +484,43 @@ function addWidget(screen, w) {
         }
     }
     throw "addRenderableWidget not found (use /chatlog debug)";
+}
+
+// ---------------------------------------------------------------- open folder / test
+
+function openFolder() {
+    var dir = baseDir();
+    if (!dir.exists()) dir.mkdirs();
+    var path = String(dir.getAbsolutePath());
+    var os = String(Packages.java.lang.System.getProperty("os.name")).toLowerCase();
+    var cmd;
+    if (os.indexOf("win") !== -1) cmd = ["explorer.exe", path];
+    else if (os.indexOf("mac") !== -1) cmd = ["open", path];
+    else cmd = ["xdg-open", path];
+
+    try {
+        var arr = JArray.newInstance(STR_CLASS, cmd.length);
+        var i;
+        for (i = 0; i < cmd.length; i++) arr[i] = cmd[i];
+        new Packages.java.lang.ProcessBuilder(arr).start();
+        return path;
+    } catch (e) {
+        warn("openFolder(process)", e);
+    }
+    try {
+        Packages.java.awt.Desktop.getDesktop().open(dir);
+        return path;
+    } catch (e2) {
+        warn("openFolder(desktop)", e2);
+    }
+    return null;
+}
+
+function doTest() {
+    var f = writeBatch(["ChatLogger test line"]);
+    if (f === null) return "nothing written (singleplayer logging is off)";
+    if (!f.exists()) return "write finished but file does not exist: " + String(f.getAbsolutePath());
+    return "OK -> " + String(f.getAbsolutePath());
 }
 
 // ---------------------------------------------------------------- GUI
@@ -445,10 +600,35 @@ function openSettings() {
     }
     addWidget(screen, editBox);
 
+    var openBtn = Button.builder(Component.literal("Open log folder"), function (b) {
+        try {
+            applyEdit();
+            var p = openFolder();
+            b.setMessage(Component.literal(p !== null ? "Open log folder" : "Open failed (see chat)"));
+            if (p !== null) say("&a[ChatLogger] &7" + p);
+        } catch (e) {
+            warn("openBtn", e);
+        }
+    }).bounds(leftX, top + 160, colW, 20).build();
+    addWidget(screen, openBtn);
+
+    var testBtn = Button.builder(Component.literal("Test write"), function (b) {
+        try {
+            applyEdit();
+            var r = doTest();
+            b.setMessage(Component.literal(r.indexOf("OK") === 0 ? "Test: OK" : "Test: FAILED"));
+            say("&7[ChatLogger] test: " + r);
+        } catch (e) {
+            b.setMessage(Component.literal("Test: FAILED"));
+            say("&c[ChatLogger] test error: " + String(e));
+        }
+    }).bounds(rightX, top + 160, colW, 20).build();
+    addWidget(screen, testBtn);
+
     var done = Button.builder(Component.literal("Done"), function (b) {
         applyEdit();
         showScreen(Minecraft.getInstance(), null);
-    }).bounds(cx - 100, top + 160, 200, 20).build();
+    }).bounds(cx - 100, top + 188, 200, 20).build();
     addWidget(screen, done);
 }
 
@@ -501,12 +681,16 @@ function setEnabled(v) {
 
 function runCommand(a) {
     if (a.length === 0) {
-        pendingOpen = true; // opens the GUI on the next tick
+        pendingOpen = true;
         return;
     }
     var sub = a[0].toLowerCase();
+    var j;
     if (sub === "gui" || sub === "settings") {
         pendingOpen = true;
+    } else if (sub === "folder" || sub === "open") {
+        var p = openFolder();
+        say(p !== null ? "&a[ChatLogger] &7" + p : "&c[ChatLogger] could not open the folder");
     } else if (sub === "toggle") {
         setEnabled(!cfg.enabled);
     } else if (sub === "on") {
@@ -518,41 +702,37 @@ function runCommand(a) {
             " 24h=" + cfg.use24h + " sec=" + cfg.showSeconds + " perServer=" + cfg.perServer +
             " perDay=" + cfg.perDay + " single=" + cfg.logSingleplayer);
         say("&7dir=" + String(baseDir().getAbsolutePath()));
+        say("&7lines written=" + written + " | chat list=" +
+            (chatList !== null ? ("found, size " + chatList.size()) : "NOT found") +
+            (lastReason !== "" ? " | " + lastReason : ""));
     } else if (sub === "test") {
-        var f = writeBatch(["ChatLogger test line"]);
-        if (f === null) {
-            say("&c[ChatLogger] nothing written (singleplayer logging is off)");
-        } else {
-            say("&a[ChatLogger] wrote test line to: &7" + String(f.getAbsolutePath()) +
-                " &7(exists=" + f.exists() + ")");
-        }
+        say("&7[ChatLogger] test: " + doTest());
     } else if (sub === "debug") {
-        var j;
         var m = mc();
         print("[ChatLogger] gameDir=" + String(gameDir().getAbsolutePath()));
         print("[ChatLogger] baseDir=" + String(baseDir().getAbsolutePath()));
-        if (m && m.gui) {
-            var chat = m.gui.getChat();
+        print("[ChatLogger] lastReason=" + lastReason);
+        var mf = m.getClass().getDeclaredFields();
+        for (j = 0; j < mf.length; j++) {
+            var tn = String(mf[j].getType().getSimpleName());
+            if (tn === "Gui" || tn === "File" || tn === "Path") {
+                print("[ChatLogger] MC field: " + String(mf[j].getName()) + " : " + tn);
+            }
+        }
+        var chat = findChat(m);
+        if (chat !== null) {
             var cf = chat.getClass().getDeclaredFields();
             for (j = 0; j < cf.length; j++) {
                 print("[ChatLogger] ChatField: " + String(cf[j].getName()) + " : " +
                     String(cf[j].getGenericType().toString()));
             }
         } else {
-            print("[ChatLogger] m.gui is not available");
+            print("[ChatLogger] chat component not found");
         }
         var ms = m.getClass().getDeclaredMethods();
         for (j = 0; j < ms.length; j++) {
             if (String(ms[j].getName()).toLowerCase().indexOf("screen") !== -1) {
-                print("[ChatLogger] MC: " + String(ms[j].toString()));
-            }
-        }
-        if (SCREEN_CLASS !== null) {
-            var sm = SCREEN_CLASS.getDeclaredMethods();
-            for (j = 0; j < sm.length; j++) {
-                if (String(sm[j].getName()).toLowerCase().indexOf("widget") !== -1) {
-                    print("[ChatLogger] Screen: " + String(sm[j].toString()));
-                }
+                print("[ChatLogger] MC method: " + String(ms[j].toString()));
             }
         }
         say("&7debug info printed to the log");
@@ -581,13 +761,12 @@ var cmdTrigger = register("command", function () {
     try {
         runCommand(a);
     } catch (e) {
-        warn("command", e);
         say("&c[ChatLogger] error: " + String(e));
+        print("[ChatLogger] command error: " + String(e));
     }
 });
 cmdTrigger.setName("chatlog");
 
-// tab completion (guess: depends on the ChatTriggers version)
 try {
     if (typeof cmdTrigger.setTabCompletions === "function") {
         try {
@@ -595,9 +774,7 @@ try {
         } catch (e1) {
             cmdTrigger.setTabCompletions(SUBCOMMANDS);
         }
-    } else {
-        print("[ChatLogger] setTabCompletions not available in this ChatTriggers version");
     }
 } catch (e2) {
-    warn("tabCompletions", e2);
+    print("[ChatLogger] tab completion error: " + String(e2));
 }
