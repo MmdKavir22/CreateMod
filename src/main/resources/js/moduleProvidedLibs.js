@@ -6,9 +6,10 @@
         if (typeof Java !== 'undefined' && typeof Java.type === 'function') {
             clazz = Java.type(path);
         } else {
+            var parts = path.split('.');
             clazz = Packages;
-            for (const part of path.split('.'))
-                clazz = clazz[part];
+            for (var i = 0; i < parts.length; i++)
+                clazz = clazz[parts[i]];
         }
 
         if (clazz == null || String(clazz).startsWith('[JavaPackage'))
@@ -27,7 +28,12 @@
 
     if (typeof global.print !== 'function') {
         const ctLog = getClass("com.chattriggers.ctjs.utils.console.CTLog").INSTANCE;
-        global.print = (...args) => ctLog.info(args.map(String).join(" "));
+        global.print = function () {
+            var out = [];
+            for (var i = 0; i < arguments.length; i++)
+                out.push(String(arguments[i]));
+            ctLog.info(out.join(" "));
+        };
     }
 
     // Extra libs
@@ -65,7 +71,8 @@
     };
 
     // animation
-    global.easeOut = (start, finish, speed, jump = 1) => {
+    global.easeOut = function (start, finish, speed, jump) {
+        if (jump === undefined) jump = 1;
         if (Math.floor(Math.abs(finish - start) / jump) > 0)
             return start + (finish - start) / speed;
         return finish;
