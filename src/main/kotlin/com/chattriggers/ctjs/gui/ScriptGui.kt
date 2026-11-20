@@ -451,6 +451,25 @@ class ScriptGui : Screen(Component.literal("ChatTriggers")) {
             rebuild()
         })
         rows += Row("", input = Input("consoleSearch", "search text", { page = 0 }, "Search"))
+        val rec = CTLog.recording
+        rows += Row(if (rec) "§c■ Stop recording & save §7(${CTLog.recordedCount()} lines)" else "§a● Start recording log", {
+            com.chattriggers.ctjs.utils.console.Recorder.toggle()
+            rebuild()
+        })
+        rows += Row("§bDump current log to file", {
+            val f = CTLog.dump()
+            status = if (f != null) "Dumped: ${f.path}" else "Dump failed"
+            rebuild()
+        })
+        rows += Row("", input = Input("recordKey", "record key (e.g. F8, R)", {
+            val code = com.chattriggers.ctjs.utils.console.Recorder.parseKey(it)
+            if (code != null) {
+                Config.recordKey = code
+                Config.save()
+                status = "Record key: " + com.chattriggers.ctjs.utils.console.Recorder.keyName(code)
+            } else status = "Use a letter, digit or F1-F12"
+        }, "Set key"))
+        rows += Row("§7Record key: §f${com.chattriggers.ctjs.utils.console.Recorder.keyName(Config.recordKey)} §7(works only with no GUI open)")
         rows += Row("§cClear console", {
             CTLog.clear()
             status = "Console cleared"

@@ -13,6 +13,13 @@ object CTLog {
     private val timeFormat = SimpleDateFormat("HH:mm:ss")
 
     val file = File("./config/ChatTriggers/ctjs.log")
+    val dumpDir = File("./config/ChatTriggers/dumps")
+
+    @Volatile
+    var recording = false
+        private set
+
+    private val recorded = ArrayList<String>()
 
     init {
         try {
@@ -30,6 +37,7 @@ object CTLog {
         text.split("\n").forEach { part ->
             val line = prefix + part
             lines.addLast(line)
+            if (recording && recorded.size < 200000) recorded.add(line)
             while (lines.size > MAX_LINES) lines.removeFirst()
 
             try {
@@ -56,6 +64,38 @@ object CTLog {
         try {
             file.writeText("")
         } catch (e: Throwable) {
+        }
+    }
+
+    private fun stamp() = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(Date())
+
+    @Synchronized
+    fun dump(): File? = try {
+        dumpDir.mkdirs()
+        File(dumpDir, "dump-${stamp()}.txt").also { it.writeText(lines.joinToString("\n") + "\n") }
+    } catch (e: Throwable) {
+        null
+    }
+
+    @Synchronized
+    fun startRecording() {
+        recorded.clear()
+        recording = true
+    }
+
+    @Synchronized
+    fun recordedCount() = recorded.size
+
+    @Synchronized
+    fun stopRecording(): File? {
+        recording = false
+        return try {
+            dumpDir.mkdirs()
+            File(dumpDir, "record-${stamp()}.txt").also { it.writeText(recorded.joinToString("\n") + "\n") }
+        } catch (e: Throwable) {
+            null
+        } finally {
+            recorded.clear()
         }
     }
 }

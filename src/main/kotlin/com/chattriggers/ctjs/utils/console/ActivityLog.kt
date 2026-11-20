@@ -140,6 +140,7 @@ object ActivityLog {
     }
 
     fun tick() {
+        Recorder.tick()
         if (!Config.logEvents && !Config.eventsInChat) return
 
         val mc = Minecraft.getInstance()

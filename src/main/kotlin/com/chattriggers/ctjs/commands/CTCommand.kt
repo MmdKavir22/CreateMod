@@ -35,6 +35,12 @@ object CTCommand {
                 )
                 .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("clear").executes { CTLog.clear(); ChatLib.chat("&7Console cleared"); 1 })
                 .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("log").executes { ChatLib.chat("&7Log file: &f${CTLog.file.absolutePath}"); 1 })
+                .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("dump").executes {
+                    val f = CTLog.dump()
+                    ChatLib.chat(if (f != null) "&aLog dumped: &f${f.path}" else "&cDump failed")
+                    1
+                })
+                .then(recordNode())
                 .then(eventsNode())
                 .then(guiNode())
                 .then(scriptsNode())
@@ -56,6 +62,23 @@ object CTCommand {
             .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("off").executes { Config.logEvents = false; Config.eventsInChat = false; status(); 1 })
             .then(LiteralArgumentBuilder.literal<FabricClientCommandSource>("chat").executes { Config.eventsInChat = !Config.eventsInChat; status(); 1 })
     }
+
+    private fun recordNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("record")
+        .executes { com.chattriggers.ctjs.utils.console.Recorder.toggle(); 1 }
+        .then(
+            LiteralArgumentBuilder.literal<FabricClientCommandSource>("key").then(
+                RequiredArgumentBuilder.argument<FabricClientCommandSource, String>("key", StringArgumentType.word())
+                    .executes { ctx: CommandContext<FabricClientCommandSource> ->
+                        val code = com.chattriggers.ctjs.utils.console.Recorder.parseKey(StringArgumentType.getString(ctx, "key"))
+                        if (code == null) ChatLib.chat("&cUse a letter, digit or F1-F12") else {
+                            Config.recordKey = code
+                            Config.save()
+                            ChatLib.chat("&aRecord key: &f${com.chattriggers.ctjs.utils.console.Recorder.keyName(code)}")
+                        }
+                        1
+                    }
+            )
+        )
 
     private fun tokenNode() = LiteralArgumentBuilder.literal<FabricClientCommandSource>("token")
         .executes { ChatLib.chat("&7GitHub token: &f${if (ScriptRepo.hasToken()) "set" else "not set"}"); 1 }
@@ -149,6 +172,8 @@ object CTCommand {
         &2/ct import <name> &7- Imports scripts/<name>/ from GitHub into modules
         &2/ct repo [owner/repo[@branch]] &7- Shows or sets the GitHub repo
         &2/ct events [on|off|chat] &7- Logs damage, knockback, movement and more (chat = show live in chat)
+        &2/ct dump &7- Saves the current log to config/ChatTriggers/dumps/
+        &2/ct record [key <F8|R>] &7- Starts/stops recording the log (also by key, default F8)
         &2/ct log &7- Shows the log file path (config/ChatTriggers/ctjs.log)
     """.trimIndent()
 }
