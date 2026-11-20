@@ -2,6 +2,7 @@
 // Command: /chatlog            -> toggle on/off
 //          /chatlog gui        -> settings screen
 //          /chatlog status     -> show current settings
+//          /chatlog debug      -> print screen-related methods to the log
 //          /chatlog set <key> <value>  -> fallback if the GUI doesn't work
 
 var Minecraft = Packages.net.minecraft.client.Minecraft;
@@ -299,10 +300,43 @@ function pollChat() {
     if (texts.length > 0) writeBatch(texts);
 }
 
-// ---------------------------------------------------------------- GUI
+// ---------------------------------------------------------------- reflection helpers
 
-function onOff(v) {
-    return v ? "ON" : "OFF";
+function callMethod(obj, method, arg) {
+    var arr = Packages.java.lang.reflect.Array.newInstance(Packages.java.lang.Object["class"], 1);
+    arr[0] = arg;
+    method.setAccessible(true);
+    return method.invoke(obj, arr);
+}
+
+function findScreenSetter() {
+    var ms = Minecraft["class"].getDeclaredMethods();
+    var screenCls = ScreenClass["class"];
+    var i;
+    for (i = 0; i < ms.length; i++) {
+        var n = String(ms[i].getName());
+        if (ms[i].getParameterCount() === 1 &&
+            ms[i].getParameterTypes()[0] === screenCls &&
+            n.toLowerCase().indexOf("screen") !== -1 &&
+            String(ms[i].getReturnType().getName()) === "void") {
+            return ms[i];
+        }
+    }
+    return null;
+}
+
+function showScreen(m, screen) {
+    var names = ["setScreen", "setScreenAndShow"];
+    var i;
+    for (i = 0; i < names.length; i++) {
+        if (typeof m[names[i]] === "function") {
+            m[names[i]](screen);
+            return;
+        }
+    }
+    var setter = findScreenSetter();
+    if (setter === null) throw "no screen setter found (use /chatlog debug)";
+    callMethod(m, setter, screen);
 }
 
 function addWidget(screen, w) {
@@ -310,14 +344,17 @@ function addWidget(screen, w) {
     var i;
     for (i = 0; i < ms.length; i++) {
         if (String(ms[i].getName()) === "addRenderableWidget" && ms[i].getParameterCount() === 1) {
-            ms[i].setAccessible(true);
-            var arr = Packages.java.lang.reflect.Array.newInstance(Packages.java.lang.Object["class"], 1);
-            arr[0] = w;
-            ms[i].invoke(screen, arr);
+            callMethod(screen, ms[i], w);
             return;
         }
     }
-    throw "addRenderableWidget not found";
+    throw "addRenderableWidget not found (use /chatlog debug)";
+}
+
+// ---------------------------------------------------------------- GUI
+
+function onOff(v) {
+    return v ? "ON" : "OFF";
 }
 
 function makeToggle(key, label, x, y, w) {
@@ -360,7 +397,7 @@ function openSettings() {
         }
     }, Component.literal("Chat Logger Settings"));
 
-    m.setScreen(screen);
+    showScreen(m, screen);
 
     var cx = Math.floor(screen.width / 2);
     var top = Math.floor(screen.height / 2) - 100;
@@ -391,7 +428,7 @@ function openSettings() {
 
     var done = Button.builder(Component.literal("Done"), function (b) {
         applyEdit();
-        Minecraft.getInstance().setScreen(null);
+        showScreen(Minecraft.getInstance(), null);
     }).bounds(cx - 100, top + 160, 200, 20).build();
     addWidget(screen, done);
 }
@@ -457,6 +494,24 @@ register("command", function () {
                 " 24h=" + cfg.use24h + " sec=" + cfg.showSeconds + " perServer=" + cfg.perServer +
                 " perDay=" + cfg.perDay + " single=" + cfg.logSingleplayer);
             say("&7dir=" + String(baseDir().getAbsolutePath()));
+        } else if (sub === "debug") {
+            var ms = Minecraft["class"].getDeclaredMethods();
+            var j;
+            var found = 0;
+            for (j = 0; j < ms.length; j++) {
+                if (String(ms[j].getName()).toLowerCase().indexOf("screen") !== -1) {
+                    print("[ChatLogger] " + String(ms[j].toString()));
+                    found++;
+                }
+            }
+            var sm = ScreenClass["class"].getDeclaredMethods();
+            for (j = 0; j < sm.length; j++) {
+                if (String(sm[j].getName()).toLowerCase().indexOf("widget") !== -1) {
+                    print("[ChatLogger] Screen: " + String(sm[j].toString()));
+                    found++;
+                }
+            }
+            say("&7" + found + " methods printed to the log");
         } else if (sub === "set" && a.length >= 3) {
             var key = a[1];
             if (!DEFAULTS.hasOwnProperty(key)) {
@@ -471,7 +526,7 @@ register("command", function () {
             saveConfig();
             say("&a[ChatLogger] " + key + " = " + cfg[key]);
         } else {
-            say("&7/chatlog | gui | status | set <key> <value>");
+            say("&7/chatlog | gui | status | debug | set <key> <value>");
         }
     } catch (e) {
         warn("command", e);
