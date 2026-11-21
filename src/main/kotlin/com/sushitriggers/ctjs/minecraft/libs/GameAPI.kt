@@ -28,7 +28,7 @@ class EntityData(
     @JvmField val distance: Double,
 )
 
-internal object GameUtil {
+object GameUtil {
     val mc: Minecraft get() = Minecraft.getInstance()
 
     fun item(stack: Any?, slot: Int): ItemData {

@@ -1053,6 +1053,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
         }
 
         fun tick() {
+            ScriptMenu.tick()
             if (pending) {
                 pending = false
                 show(ScriptGui())

@@ -49,6 +49,7 @@
     loadClass("com.sushitriggers.ctjs.minecraft.libs.WorldLib", "World");
     loadClass("com.sushitriggers.ctjs.minecraft.libs.ClientLib", "Client");
     loadClass("com.sushitriggers.ctjs.minecraft.libs.ContainerLib", "Container");
+    loadInstance("com.sushitriggers.ctjs.gui.ScriptMenu", "Menu");
 
     // Triggers
     loadInstance("com.sushitriggers.ctjs.engine.langs.js.JSRegister", "TriggerRegister");
