@@ -1,0 +1,282 @@
+var Minecraft = Packages.net.minecraft.client.Minecraft;
+
+var SETTINGS_FILE = "./config/SushiTriggers/showtimers-settings.json";
+var FORGE_FILE = "./config/SushiTriggers/showtimers-forge.json";
+
+var defaults = { enabled: true, darkAuction: true, forge: true, x: 6, y: 70 };
+var settings = {};
+var forgeEntries = [];
+var tickCount = 0;
+var failed = false;
+
+function readFile(path) {
+    try {
+        var f = new java.io.File(path);
+        if (!f.exists()) return null;
+        return String(new java.lang.String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8"));
+    } catch (e) {
+        return null;
+    }
+}
+
+function writeFile(path, text) {
+    try {
+        var w = new java.io.FileWriter(path);
+        w.write(text);
+        w.close();
+    } catch (e) {}
+}
+
+function loadSettings() {
+    var saved = {};
+    try {
+        var text = readFile(SETTINGS_FILE);
+        if (text) saved = JSON.parse(text);
+    } catch (e) {}
+    for (var k in defaults) {
+        settings[k] = saved[k] !== undefined ? saved[k] : defaults[k];
+    }
+}
+
+function saveSettings() {
+    writeFile(SETTINGS_FILE, JSON.stringify(settings));
+}
+
+function loadForge() {
+    try {
+        var text = readFile(FORGE_FILE);
+        if (text) {
+            var data = JSON.parse(text);
+            if (data && data.length !== undefined) forgeEntries = data;
+        }
+    } catch (e) {}
+}
+
+function saveForge() {
+    writeFile(FORGE_FILE, JSON.stringify(forgeEntries));
+}
+
+function pad(n) {
+    return n < 10 ? "0" + n : "" + n;
+}
+
+function fmt(sec) {
+    if (sec < 0) sec = 0;
+    var h = Math.floor(sec / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    var s = Math.floor(sec % 60);
+    return (h > 0 ? h + ":" + pad(m) : "" + m) + ":" + pad(s);
+}
+
+function parseDuration(text) {
+    var re = /(\d+)\s*([dhms])/gi;
+    var total = 0;
+    var found = false;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+        found = true;
+        var n = parseInt(m[1], 10);
+        var u = m[2].toLowerCase();
+        total += u === "d" ? n * 86400 : u === "h" ? n * 3600 : u === "m" ? n * 60 : n;
+    }
+    return found ? total : -1;
+}
+
+// ---------- Dark Auction (every hour at :55 UTC, lasts 5 minutes) ----------
+function darkAuctionLine() {
+    var now = new Date();
+    var secondsOfHour = now.getUTCMinutes() * 60 + now.getUTCSeconds();
+    var start = 55 * 60;
+    if (secondsOfHour >= start) {
+        var left = 3600 - secondsOfHour;
+        return { text: "Dark Auction: ACTIVE " + fmt(left), color: 0x55FF55 };
+    }
+    var wait = start - secondsOfHour;
+    return { text: "Dark Auction: " + fmt(wait), color: wait <= 60 ? 0xFFFF55 : 0xFFFFFF };
+}
+
+// ---------- Forge ----------
+function loreOf(stack) {
+    var out = [];
+    try {
+        var DC = Packages.net.minecraft.core.component.DataComponents;
+        var lore = stack.get(DC.LORE);
+        if (lore == null) return out;
+        var lines = lore.lines();
+        for (var i = 0; i < lines.size(); i++) out.push(String(lines.get(i).getString()));
+    } catch (e) {}
+    return out;
+}
+
+function scanForge(mc, dumpToFile) {
+    var title = null;
+    try {
+        title = mc.screen != null ? String(mc.screen.getTitle().getString()) : null;
+    } catch (e) {}
+    if (title == null) return false;
+    var isForge = title.toLowerCase().indexOf("forge") >= 0;
+    if (!isForge && !dumpToFile) return false;
+
+    var slots = mc.player.containerMenu.slots;
+    var found = [];
+    var dump = ["title: " + title];
+
+    for (var i = 0; i < slots.size(); i++) {
+        var stack = slots.get(i).getItem();
+        if (stack.isEmpty()) continue;
+        var name = String(stack.getHoverName().getString());
+        var lore = loreOf(stack);
+        dump.push("slot " + i + ": " + name);
+        for (var k = 0; k < lore.length; k++) dump.push("    " + lore[k]);
+
+        var seconds = -1;
+        var ready = false;
+        for (var j = 0; j < lore.length; j++) {
+            if (/remaining/i.test(lore[j])) seconds = parseDuration(lore[j]);
+            if (/collect/i.test(lore[j])) ready = true;
+        }
+        if (seconds >= 0 || ready) {
+            var itemName = name;
+            for (var n = 0; n < lore.length; n++) {
+                var mm = /^Item:?\s*(.+)$/i.exec(lore[n]);
+                if (mm) itemName = mm[1];
+            }
+            found.push({
+                slot: i,
+                name: itemName,
+                end: seconds >= 0 ? Date.now() + seconds * 1000 : Date.now()
+            });
+        }
+    }
+
+    if (dumpToFile) {
+        writeFile("./config/SushiTriggers/showtimers-forge-dump.txt", dump.join("\n"));
+        return true;
+    }
+
+    if (isForge && slots.size() > 0) {
+        forgeEntries = found;
+        saveForge();
+        return true;
+    }
+    return false;
+}
+
+// ---------- Panel ----------
+function updatePanel() {
+    if (!settings.enabled) {
+        Hud.remove("showtimers");
+        return;
+    }
+
+    var lines = [];
+    var colors = [];
+
+    if (settings.darkAuction) {
+        var da = darkAuctionLine();
+        lines.push(da.text);
+        colors.push(da.color);
+    }
+
+    if (settings.forge) {
+        for (var i = 0; i < forgeEntries.length; i++) {
+            var left = Math.round((forgeEntries[i].end - Date.now()) / 1000);
+            lines.push(forgeEntries[i].name + ": " + (left <= 0 ? "READY" : fmt(left)));
+            colors.push(left <= 0 ? 0x55FF55 : (left <= 60 ? 0xFFFF55 : 0xFFFFFF));
+        }
+        if (forgeEntries.length === 0) {
+            lines.push("Forge: open the menu once");
+            colors.push(0xAAAAAA);
+        }
+    }
+
+    if (lines.length === 0) {
+        Hud.remove("showtimers");
+        return;
+    }
+    Hud.panel("showtimers", "Timers", 0xFF55FF, lines, colors, settings.x, settings.y);
+}
+
+// ---------- Menu ----------
+var MENU_IDS = ["enabled", "darkAuction", "forge", "clearForge"];
+
+function onoff(v) {
+    return v ? "[ON]  " : "[OFF] ";
+}
+
+function menuLabel(id) {
+    if (id === "enabled") return onoff(settings.enabled) + "Show timers on screen";
+    if (id === "darkAuction") return onoff(settings.darkAuction) + "Dark Auction";
+    if (id === "forge") return onoff(settings.forge) + "Forge";
+    if (id === "clearForge") return "Clear saved forge timers";
+    return id;
+}
+
+function menuClick(id) {
+    if (id === "clearForge") {
+        forgeEntries = [];
+        saveForge();
+    } else {
+        settings[id] = !settings[id];
+        saveSettings();
+    }
+    updatePanel();
+}
+
+function openMenu() {
+    Menu.open("ShowTimers", MENU_IDS, menuClick, menuLabel);
+}
+
+// ---------- Triggers ----------
+loadSettings();
+loadForge();
+
+register("tick", function () {
+    tickCount++;
+    var mc = Minecraft.getInstance();
+    if (mc.player == null) return;
+    try {
+        if (tickCount % 10 === 0 && mc.screen != null) scanForge(mc, false);
+        if (tickCount % 5 === 0) updatePanel();
+    } catch (e) {
+        if (!failed) {
+            failed = true;
+            ChatLib.chat("&c[ShowTimers] " + e);
+            print("[ShowTimers] " + e);
+        }
+    }
+});
+
+register("gameUnload", function () {
+    Hud.remove("showtimers");
+});
+
+register("command", function (a, b, c) {
+    if (a === "pos") {
+        var nx = parseInt(b, 10);
+        var ny = parseInt(c, 10);
+        if (!isNaN(nx)) settings.x = nx;
+        if (!isNaN(ny)) settings.y = ny;
+        saveSettings();
+        ChatLib.chat("&d[ShowTimers] &fposition " + settings.x + ", " + settings.y);
+        return;
+    }
+    if (a === "dump") {
+        var mc = Minecraft.getInstance();
+        var ok = false;
+        try { ok = mc.screen != null && scanForge(mc, true); } catch (e) { ok = false; }
+        ChatLib.chat(ok ? "&a[ShowTimers] saved config/SushiTriggers/showtimers-forge-dump.txt" : "&c[ShowTimers] open the Forge menu first");
+        return;
+    }
+    if (a === "list") {
+        ChatLib.chat("&d[ShowTimers] &f" + darkAuctionLine().text);
+        for (var i = 0; i < forgeEntries.length; i++) {
+            var left = Math.round((forgeEntries[i].end - Date.now()) / 1000);
+            ChatLib.chat("&d[ShowTimers] &f" + forgeEntries[i].name + ": " + (left <= 0 ? "READY" : fmt(left)));
+        }
+        return;
+    }
+    openMenu();
+}).setName("showtimer");
+
+ChatLib.chat("&d[ShowTimers] &7loaded. /showtimer opens the settings menu");
