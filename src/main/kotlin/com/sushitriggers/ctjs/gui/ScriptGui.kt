@@ -54,14 +54,27 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
     private var panelW = 0
 
     override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
+        val left = panelX - 8
+        val right = panelX + panelW + 8
+        val contentX = panelX + sidebar + 4
+
         graphics.fillGradient(0, 0, width, height, 0xF00A0614.toInt(), 0xF0190B33.toInt())
-        graphics.fill(panelX - 8, 2, panelX + panelW + 8, height - 2, 0xB0140A26.toInt())
-        graphics.outline(panelX - 8, 2, panelW + 16, height - 4, 0xFF8A2BE2.toInt())
-        graphics.fill(panelX - 8, height - 52, panelX + panelW + 8, height - 2, 0x80000000.toInt())
+        graphics.fill(left, 2, right, height - 2, 0xB0140A26.toInt())
+        graphics.outline(left, 2, right - left, height - 4, 0xFF8A2BE2.toInt())
+
+        graphics.fill(left + 1, 3, right - 1, 28, 0xFF2A1250.toInt())
+        graphics.text(font, "SUSHITRIGGERS", panelX, 11, 0xFFD9A8FF.toInt(), true)
+        graphics.text(font, "v${Reference.MODVERSION}  |  ${Tab.values()[activeIndex].title}", panelX + 100, 11, 0xFF9B6BD6.toInt(), true)
+
+        graphics.fill(left + 1, 28, right - 1, 30, 0xFFB362FF.toInt())
+
+        graphics.fill(panelX - 4, 34, panelX + sidebar + 4, height - 54, 0x66000000.toInt())
+        graphics.fill(panelX - 4, 36 + activeIndex * 22, panelX - 1, 56 + activeIndex * 22, 0xFFB362FF.toInt())
+        graphics.fill(contentX, 34, contentX + 1, height - 54, 0xFF5B2A9E.toInt())
+
+        graphics.fill(left + 1, height - 52, right - 1, height - 3, 0x80000000.toInt())
 
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
-
-        graphics.fill(panelX, 28, panelX + panelW, 30, 0xFFB362FF.toInt())
     }
 
     private fun homeRows(): List<Row> {
@@ -100,7 +113,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
         rows += header("TIPS")
         rows += Row("§7• Tabs above: Scripts, Modules, Console, Events, Editor, Settings, Info")
         rows += Row("§7• Record key: §f${com.sushitriggers.ctjs.utils.console.Recorder.keyName(Config.recordKey)} §7(works with no GUI open)")
-        rows += Row("§7• /ct opens this window, /ct help lists all commands")
+        rows += Row("§7• /st opens this window, /st help lists all commands")
         return rows
     }
 
@@ -114,18 +127,18 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
         return Button.builder(Component.literal(text)) { onPress() }.bounds(x, y, w, 20).build()
     }
 
+    private val sidebar = 96
+
     private fun build() {
-        val w = minOf(width - 20, 470)
+        val w = minOf(width - 20, 560)
         boxes.clear()
         val x = (width - w) / 2
         panelX = x
         panelW = w
 
         val tabs = Tab.values()
-        val gap = 2
-        val tabWidth = (w - gap * (tabs.size - 1)) / tabs.size
         tabs.forEachIndexed { index, t ->
-            val button = action(t.title, x + index * (tabWidth + gap), 6, tabWidth) {
+            val button = action((if (t == tab) "> " else "  ") + t.title, x, 36 + index * 22, sidebar) {
                 tab = t
                 page = 0
                 rebuild()
@@ -133,7 +146,14 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
             button.active = t != tab
             addRenderableWidget(button)
         }
+        activeIndex = tabs.indexOf(tab)
 
+        buildContent(x + sidebar + 8, w - sidebar - 8)
+    }
+
+    private var activeIndex = 0
+
+    private fun buildContent(x: Int, w: Int) {
         if (tab == Tab.EDITOR && editFile != null) {
             if (!buildEditorMulti(x, w)) buildEditor(x, w)
             return
@@ -548,7 +568,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
         val names = ScriptRepo.cached
 
         rows += Row("§bRefresh list §7(${ScriptRepo.spec()})", { loadList() })
-        rows += Row("§7Change repo with: /ct repo owner/repo[@branch]")
+        rows += Row("§7Change repo with: /st repo owner/repo[@branch]")
 
         if (names.isEmpty()) rows += Row(if (loading) "Loading..." else "No scripts found in scripts/")
 

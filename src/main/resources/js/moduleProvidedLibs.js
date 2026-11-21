@@ -44,6 +44,7 @@
     loadClass("com.sushitriggers.ctjs.minecraft.libs.ChatLib");
     loadClass("com.sushitriggers.ctjs.minecraft.libs.FileLib");
     loadClass("com.sushitriggers.ctjs.minecraft.libs.MathLib");
+    loadClass("com.sushitriggers.ctjs.minecraft.libs.HudOverlay", "Hud");
 
     // Triggers
     loadInstance("com.sushitriggers.ctjs.engine.langs.js.JSRegister", "TriggerRegister");

@@ -95,7 +95,7 @@ object ScriptRepo {
     @Synchronized
     fun uploadModule(name: String): Int {
         require(validName.matches(name) && name != "." && name != "..") { "Invalid script name: $name" }
-        if (token() == null) throw IllegalStateException("No GitHub token set (Config tab, or /ct token <token>)")
+        if (token() == null) throw IllegalStateException("No GitHub token set (Config tab, or /st token <token>)")
 
         val dir = File(ModuleManager.modulesFolder, name)
         require(dir.isDirectory) { "Module $name was not found in modules/" }

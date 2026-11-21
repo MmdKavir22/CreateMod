@@ -52,7 +52,7 @@ object CTCommand {
         )
 
         dispatcher.register(
-            LiteralArgumentBuilder.literal<FabricClientCommandSource>("ct")
+            LiteralArgumentBuilder.literal<FabricClientCommandSource>("st")
                 .executes { ScriptGui.open(); 1 }
                 .redirect(root)
         )
@@ -166,20 +166,20 @@ object CTCommand {
 
     private fun getUsage() = """
         &b&m${"-".repeat(40)}
-        &2/ct &7- Opens the GUI
-        &2/ct load &7- Reloads all of the SushiTriggers modules
-        &2/ct unload &7- Unloads all of the SushiTriggers modules
-        &2/ct console [lines] &7- Shows the latest console lines in chat
-        &2/ct clear &7- Clears the console
-        &2/ct token <github token> &7- Saves the token used for uploads
-        &2/ct upload <name> &7- Uploads modules/<name> to scripts/<name>/ on GitHub
-        &2/ct gui &7- Opens the script manager GUI
-        &2/ct scripts &7- Lists scripts in the GitHub repo (scripts/<name>/)
-        &2/ct import <name> &7- Imports scripts/<name>/ from GitHub into modules
-        &2/ct repo [owner/repo[@branch]] &7- Shows or sets the GitHub repo
-        &2/ct events [on|off|chat] &7- Logs damage, knockback, movement and more (chat = show live in chat)
-        &2/ct dump &7- Saves the current log to config/SushiTriggers/dumps/
-        &2/ct record [key <F8|R>] &7- Starts/stops recording the log (also by key, default F8)
-        &2/ct log &7- Shows the log file path (config/SushiTriggers/ctjs.log)
+        &2/st &7- Opens the GUI
+        &2/st load &7- Reloads all of the SushiTriggers modules
+        &2/st unload &7- Unloads all of the SushiTriggers modules
+        &2/st console [lines] &7- Shows the latest console lines in chat
+        &2/st clear &7- Clears the console
+        &2/st token <github token> &7- Saves the token used for uploads
+        &2/st upload <name> &7- Uploads modules/<name> to scripts/<name>/ on GitHub
+        &2/st gui &7- Opens the script manager GUI
+        &2/st scripts &7- Lists scripts in the GitHub repo (scripts/<name>/)
+        &2/st import <name> &7- Imports scripts/<name>/ from GitHub into modules
+        &2/st repo [owner/repo[@branch]] &7- Shows or sets the GitHub repo
+        &2/st events [on|off|chat] &7- Logs damage, knockback, movement and more (chat = show live in chat)
+        &2/st dump &7- Saves the current log to config/SushiTriggers/dumps/
+        &2/st record [key <F8|R>] &7- Starts/stops recording the log (also by key, default F8)
+        &2/st log &7- Shows the log file path (config/SushiTriggers/ctjs.log)
     """.trimIndent()
 }

@@ -20,6 +20,7 @@ import kotlin.concurrent.thread
 class CTJS : ClientModInitializer {
     override fun onInitializeClient() {
         Config.load()
+        com.sushitriggers.ctjs.minecraft.libs.HudOverlay.register()
 
         ClientCommandRegistrationCallback.EVENT.register { dispatcher, _ ->
             Command.attach(dispatcher)

@@ -27,6 +27,7 @@ object Reference {
         TriggerType.GameUnload.triggerAll()
 
         isLoaded = false
+        com.sushitriggers.ctjs.minecraft.libs.HudOverlay.clear()
 
         ModuleManager.teardown()
 
