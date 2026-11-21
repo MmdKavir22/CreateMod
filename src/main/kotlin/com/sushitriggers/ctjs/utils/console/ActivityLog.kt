@@ -1,6 +1,8 @@
 package com.sushitriggers.ctjs.utils.console
 
 import com.sushitriggers.ctjs.minecraft.libs.ChatLib
+import com.sushitriggers.ctjs.minecraft.listeners.ChatWatcher
+import com.sushitriggers.ctjs.triggers.TriggerType
 import com.sushitriggers.ctjs.utils.Config
 import com.sushitriggers.ctjs.utils.Refl
 import net.minecraft.client.Minecraft
@@ -40,7 +42,7 @@ object ActivityLog {
 
     val categories = listOf(
         "health", "knockback", "movement", "items", "inventory", "container",
-        "clicks", "keys", "screens", "target", "effects", "blocks", "world"
+        "clicks", "keys", "screens", "target", "effects", "blocks", "chat", "world"
     )
 
     val categoryHelp = mapOf(
@@ -56,6 +58,7 @@ object ActivityLog {
         "target" to "entity under the crosshair",
         "effects" to "potion effects gained or lost",
         "blocks" to "blocks broken, placed or changed near you, block you look at",
+        "chat" to "every chat / system message you receive",
         "world" to "join, leave, dimension change, xp level"
     )
 
@@ -75,10 +78,16 @@ object ActivityLog {
         text.startsWith("TARGET") -> "target"
         text.startsWith("EFFECT") -> "effects"
         text.startsWith("BLOCK") -> "blocks"
+        text.startsWith("CHAT") -> "chat"
         else -> "world"
     }
 
     fun event(text: String) {
+        try {
+            TriggerType.Event.triggerAll(categoryOf(text), text)
+        } catch (e: Throwable) {
+        }
+
         if (categoryOf(text) in Config.disabledEventCategories) return
 
         val hideWords = Config.eventHideWords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -143,9 +152,9 @@ object ActivityLog {
 
     fun tick() {
         Recorder.tick()
-        if (!Config.logEvents && !Config.eventsInChat) return
 
         val mc = Minecraft.getInstance()
+        safe { ChatWatcher.tick(mc) }
         val player = mc.player
 
         val screenName = Refl.get(mc, "screen")?.javaClass?.simpleName
@@ -189,7 +198,7 @@ object ActivityLog {
         safe { trackContainer(player) }
         safe { trackTarget(mc) }
         safe { trackXpAndEffects(player) }
-        safe { trackBlocks(mc, player, level) }
+        if ("blocks" !in Config.disabledEventCategories) safe { trackBlocks(mc, player, level) }
     }
 
     private var blockMap = HashMap<Long, Any?>()
@@ -441,8 +450,13 @@ object ActivityLog {
 
         if (name != lastMenuName) {
             if (lastMenuName != null) {
-                if (isPlayerMenu) event("CONTAINER closed: $lastMenuName")
-                else event("CONTAINER opened: $name (${slots?.size ?: "?"} slots)")
+                if (isPlayerMenu) {
+                    event("CONTAINER closed: $lastMenuName")
+                    safe { TriggerType.ContainerClose.triggerAll(lastMenuName) }
+                } else {
+                    event("CONTAINER opened: $name (${slots?.size ?: "?"} slots)")
+                    safe { TriggerType.ContainerOpen.triggerAll(name, slots?.size ?: 0) }
+                }
             }
             lastMenuName = name
             lastMenuSlots = null

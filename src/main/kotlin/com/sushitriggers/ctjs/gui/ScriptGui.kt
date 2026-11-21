@@ -22,7 +22,7 @@ private enum class Tab(val title: String) {
     HOME("Home"),
     SCRIPTS("Scripts"),
     MODULES("Modules"),
-    CONSOLE("Console"),
+    TERMINAL("Terminal"),
     EVENTS("Events"),
     EDITOR("Editor"),
     SETTINGS("Settings"),
@@ -53,28 +53,207 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
     private var panelX = 0
     private var panelW = 0
 
+    override fun extractBackground(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
+    }
+
     override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
         val left = panelX - 8
         val right = panelX + panelW + 8
         val contentX = panelX + sidebar + 4
 
-        graphics.fillGradient(0, 0, width, height, 0xF00A0614.toInt(), 0xF0190B33.toInt())
-        graphics.fill(left, 2, right, height - 2, 0xB0140A26.toInt())
-        graphics.outline(left, 2, right - left, height - 4, 0xFF8A2BE2.toInt())
+        graphics.fill(left, 2, right, height - 2, 0x4D140A26)
+        graphics.outline(left, 2, right - left, height - 4, 0x66D9B8FF)
 
-        graphics.fill(left + 1, 3, right - 1, 28, 0xFF2A1250.toInt())
-        graphics.text(font, "SUSHITRIGGERS", panelX, 11, 0xFFD9A8FF.toInt(), true)
-        graphics.text(font, "v${Reference.MODVERSION}  |  ${Tab.values()[activeIndex].title}", panelX + 100, 11, 0xFF9B6BD6.toInt(), true)
+        graphics.fill(left + 1, 3, right - 1, 28, 0x33FFFFFF)
+        graphics.fill(left + 1, 3, right - 1, 4, 0x55FFFFFF)
+        graphics.text(font, "SUSHITRIGGERS", panelX, 11, 0xFFF0DCFF.toInt(), true)
+        graphics.text(font, "v${Reference.MODVERSION}  |  ${Tab.values()[activeIndex].title}", panelX + 100, 11, 0xCCCDA6F5.toInt(), true)
 
-        graphics.fill(left + 1, 28, right - 1, 30, 0xFFB362FF.toInt())
+        graphics.fill(left + 1, 28, right - 1, 29, 0xAAB362FF.toInt())
 
-        graphics.fill(panelX - 4, 34, panelX + sidebar + 4, height - 54, 0x66000000.toInt())
+        graphics.fill(panelX - 4, 34, panelX + sidebar + 4, height - 54, 0x22FFFFFF)
         graphics.fill(panelX - 4, 36 + activeIndex * 22, panelX - 1, 56 + activeIndex * 22, 0xFFB362FF.toInt())
-        graphics.fill(contentX, 34, contentX + 1, height - 54, 0xFF5B2A9E.toInt())
+        graphics.fill(contentX, 34, contentX + 1, height - 54, 0x44D9B8FF)
 
-        graphics.fill(left + 1, height - 52, right - 1, height - 3, 0x80000000.toInt())
+        graphics.fill(left + 1, height - 52, right - 1, height - 3, 0x33000000)
+
+        if (tab == Tab.TERMINAL) drawTerminal(graphics)
 
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
+    }
+
+
+    private var termX = 0
+    private var termW = 0
+    private var termTop = 56
+    private var termBottom = 100
+
+    private fun termFilterName() = listOf("ALL", "ERRORS", "EVENTS", "LOG")[termFilter]
+
+    private fun termLines(): List<String> {
+        val search = termSearch.trim()
+        return CTLog.last(500).filter {
+            when (termFilter) {
+                1 -> "[ERROR]" in it || "[WARN]" in it
+                2 -> "[EVENT]" in it
+                3 -> "[EVENT]" !in it
+                else -> true
+            }
+        }.filter { search.isEmpty() || it.contains(search, ignoreCase = true) }
+    }
+
+    private fun termColor(line: String): Int = when {
+        "[ERROR]" in line -> 0xFF5555
+        "[WARN]" in line -> 0xFFFF55
+        "[TERM] >" in line -> 0x55FF55
+        "[TERM]" in line -> 0xAAFFAA
+        "[EVENT] CHAT" in line -> 0xFFAA00
+        "[EVENT]" in line -> 0x55FFFF
+        else -> 0xCCCCCC
+    }
+
+    private fun termClean(line: String, max: Int): String {
+        var t = line.replace("[INFO] ", "").replace('§', '?').replace("\t", "  ")
+        while (t.length > 4 && com.sushitriggers.ctjs.minecraft.libs.HudOverlay.textWidth(t) > max) {
+            t = t.take(t.length - maxOf(1, (t.length - max / 6) / 2).coerceAtLeast(1))
+        }
+        return t
+    }
+
+    private fun termOut(text: String) = CTLog.add(com.sushitriggers.ctjs.utils.console.LogType.INFO, "[TERM] $text")
+
+    private fun termRun(raw: String) {
+        val command = raw.trim()
+        if (command.isEmpty()) return
+        termOut("> $command")
+        termScroll = 0
+
+        val parts = command.split(Regex("\\s+"), limit = 2)
+        val name = parts[0].lowercase()
+        val arg = parts.getOrNull(1)?.trim() ?: ""
+
+        when (name) {
+            "help" -> {
+                termOut("help | clear | dump | rec | reload | find <text> | filter all|err|evt|log")
+                termOut("events on|off | cats | hide <category> | show <category> | js <code>")
+            }
+            "clear" -> CTLog.clear()
+            "dump" -> termOut(CTLog.dump()?.let { "dumped: ${it.path}" } ?: "dump failed")
+            "rec" -> com.sushitriggers.ctjs.utils.console.Recorder.toggle()
+            "reload" -> {
+                Reference.loadCT()
+                termOut("reloading scripts...")
+            }
+            "find" -> {
+                termSearch = arg
+                termOut(if (arg.isEmpty()) "search cleared" else "searching: $arg")
+            }
+            "filter" -> {
+                termFilter = when (arg.lowercase()) {
+                    "err", "errors" -> 1
+                    "evt", "events" -> 2
+                    "log" -> 3
+                    else -> 0
+                }
+                termOut("filter: ${termFilterName()}")
+            }
+            "events" -> {
+                Config.logEvents = arg.lowercase() != "off"
+                Config.save()
+                termOut("event log: " + if (Config.logEvents) "on" else "off")
+            }
+            "cats" -> ActivityLog.categories.forEach {
+                termOut((if (it in Config.disabledEventCategories) "[off] " else "[on]  ") + it + " - " + (ActivityLog.categoryHelp[it] ?: ""))
+            }
+            "hide", "show" -> {
+                val category = arg.lowercase()
+                if (category !in ActivityLog.categories) {
+                    termOut("unknown category, use: cats")
+                } else {
+                    if (name == "hide") Config.disabledEventCategories.add(category) else Config.disabledEventCategories.remove(category)
+                    Config.save()
+                    termOut("$name $category")
+                }
+            }
+            "js" -> {
+                try {
+                    termOut("= " + JSLoader.eval(arg))
+                } catch (e: Throwable) {
+                    termOut("JS error: ${e.message}")
+                }
+            }
+            else -> termOut("unknown command: $name (type help)")
+        }
+    }
+
+    private fun buildTerminal(x: Int, w: Int) {
+        termX = x
+        termW = w
+        termTop = 56
+        termBottom = height - 82
+
+        val quarter = (w - 6) / 4
+        addRenderableWidget(action("Filter: " + termFilterName(), x, 32, quarter) {
+            termFilter = (termFilter + 1) % 4
+            termScroll = 0
+            rebuild()
+        })
+        addRenderableWidget(action(if (CTLog.recording) "Stop rec" else "Record", x + quarter + 2, 32, quarter) {
+            com.sushitriggers.ctjs.utils.console.Recorder.toggle()
+            rebuild()
+        })
+        addRenderableWidget(action("Dump", x + (quarter + 2) * 2, 32, quarter) {
+            val f = CTLog.dump()
+            status = if (f != null) "Dumped: ${f.path}" else "Dump failed"
+            rebuild()
+        })
+        addRenderableWidget(action("Clear", x + (quarter + 2) * 3, 32, quarter) {
+            CTLog.clear()
+            termScroll = 0
+            rebuild()
+        })
+
+        val box = makeBox(x, height - 78, w - 74, 20, inputs["term"] ?: "", "> type a command (help)")
+        if (box != null) {
+            boxes["term"] = box
+            addRenderableWidget(box)
+        }
+        addRenderableWidget(action("Run", x + w - 70, height - 78, 70) {
+            flush()
+            val c = inputs["term"] ?: ""
+            inputs["term"] = ""
+            termRun(c)
+            rebuild()
+        })
+
+        addRenderableWidget(label(status, x, height - 52, w))
+
+        val third = (w - 80 - 6) / 3
+        addRenderableWidget(action("Older", x, height - 24, third) { termScroll += 8; rebuild() })
+        addRenderableWidget(action("Newer", x + third + 2, height - 24, third) { termScroll = maxOf(0, termScroll - 8); rebuild() })
+        addRenderableWidget(action("Latest", x + (third + 2) * 2, height - 24, third) { termScroll = 0; rebuild() })
+        addRenderableWidget(action("Close", x + w - 76, height - 24, 76) { show(null) })
+    }
+
+    private fun drawTerminal(graphics: GuiGraphicsExtractor) {
+        val x = termX
+        val w = termW
+        graphics.fill(x, termTop, x + w, termBottom, 0xB0000000.toInt())
+        graphics.outline(x, termTop, w, termBottom - termTop, 0x6655FF55)
+
+        val lines = termLines()
+        val visible = maxOf(1, (termBottom - termTop - 6) / 10)
+        val end = (lines.size - termScroll).coerceIn(0, lines.size)
+        val start = maxOf(0, end - visible)
+
+        for (i in start until end) {
+            val line = lines[i]
+            graphics.text(font, termClean(line, w - 10), x + 4, termTop + 3 + (i - start) * 10, termColor(line) or (0xFF shl 24), false)
+        }
+
+        val info = "${lines.size} lines" + (if (termScroll > 0) " | scrolled $termScroll" else "") +
+                (if (termSearch.isNotEmpty()) " | find: $termSearch" else "") + (if (CTLog.recording) " | REC" else "")
+        graphics.text(font, info, x + 4, termBottom + 4, 0xFF88AA88.toInt(), false)
     }
 
     private fun homeRows(): List<Row> {
@@ -98,6 +277,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
             Reference.loadCT()
             rebuild()
         })
+        rows += Row("§eOpen modules folder", { openModulesFolder(); rebuild() })
         rows += Row("§b✎ Open code editor", { tab = Tab.EDITOR; page = 0; rebuild() })
         rows += Row("§b☁ Import scripts from GitHub", { tab = Tab.SCRIPTS; page = 0; rebuild() })
         rows += Row(if (CTLog.recording) "§c■ Stop recording log" else "§a● Start recording log", {
@@ -111,7 +291,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
         })
 
         rows += header("TIPS")
-        rows += Row("§7• Tabs above: Scripts, Modules, Console, Events, Editor, Settings, Info")
+        rows += Row("§7• Tabs: Scripts, Modules, Terminal, Events, Editor, Settings, Info")
         rows += Row("§7• Record key: §f${com.sushitriggers.ctjs.utils.console.Recorder.keyName(Config.recordKey)} §7(works with no GUI open)")
         rows += Row("§7• /st opens this window, /st help lists all commands")
         return rows
@@ -154,6 +334,11 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
     private var activeIndex = 0
 
     private fun buildContent(x: Int, w: Int) {
+        if (tab == Tab.TERMINAL) {
+            buildTerminal(x, w)
+            return
+        }
+
         if (tab == Tab.EDITOR && editFile != null) {
             if (!buildEditorMulti(x, w)) buildEditor(x, w)
             return
@@ -164,7 +349,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
             Tab.EDITOR -> editorBrowserRows()
             Tab.SCRIPTS -> scriptRows()
             Tab.MODULES -> moduleRows()
-            Tab.CONSOLE -> consoleRows()
+            Tab.TERMINAL -> emptyList()
             Tab.EVENTS -> eventRows()
             Tab.SETTINGS -> settingRows()
             Tab.INFO -> infoRows()
@@ -253,6 +438,22 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
                     editDirty = true
                 }
             } else inputs[id] = v
+        }
+    }
+
+    private fun openModulesFolder() {
+        try {
+            val dir = ModuleManager.modulesFolder.absoluteFile.apply { mkdirs() }
+            val os = System.getProperty("os.name").lowercase()
+            val command = when {
+                "win" in os -> listOf("explorer", dir.path)
+                "mac" in os -> listOf("open", dir.path)
+                else -> listOf("xdg-open", dir.path)
+            }
+            ProcessBuilder(command).start()
+            status = "Opened modules folder"
+        } catch (e: Throwable) {
+            status = "Could not open folder: ${ModuleManager.modulesFolder.path}"
         }
     }
 
@@ -540,6 +741,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
         val rows = mutableListOf<Row>()
         rows += header("CODE EDITOR (local files only)")
         rows += Row("", input = Input("newScript", "new script name", { createScript(it) }, "Create"))
+        rows += Row("§eOpen modules folder", { openModulesFolder(); rebuild() })
         rows += Row("§7Pick a file to edit. Changes are saved only on your computer.")
 
         val folders = ModuleManager.modulesFolder.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name.lowercase() }
@@ -599,6 +801,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
             Reference.loadCT()
             rebuild()
         })
+        rows += Row("§eOpen modules folder", { openModulesFolder(); rebuild() })
         rows += Row("§7${modules.size} modules in ${ModuleManager.modulesFolder.path}")
 
         modules.forEach { module ->
@@ -830,6 +1033,9 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
         private var tab = Tab.HOME
         private var page = 0
         private var filter = 0
+        private var termFilter = 0
+        private var termScroll = 0
+        private var termSearch = ""
         private var confirmDelete: String? = null
         private val inputs = mutableMapOf<String, String>()
         private val editable = setOf("js", "json", "txt", "md", "html", "css", "yml", "yaml")

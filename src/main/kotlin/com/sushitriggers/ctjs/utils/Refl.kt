@@ -26,6 +26,30 @@ object Refl {
         }
     }
 
+    private fun boxed(type: Class<*>): Class<*> = when (type) {
+        Int::class.javaPrimitiveType -> Int::class.javaObjectType
+        Long::class.javaPrimitiveType -> Long::class.javaObjectType
+        Double::class.javaPrimitiveType -> Double::class.javaObjectType
+        Float::class.javaPrimitiveType -> Float::class.javaObjectType
+        Boolean::class.javaPrimitiveType -> Boolean::class.javaObjectType
+        else -> type
+    }
+
+    fun callN(target: Any?, name: String, vararg args: Any?): Any? {
+        if (target == null) return null
+
+        val method = target.javaClass.methods.firstOrNull { m ->
+            m.name == name && m.parameterCount == args.size &&
+                    m.parameterTypes.indices.all { i -> args[i] == null || boxed(m.parameterTypes[i]).isInstance(args[i]) }
+        } ?: return null
+
+        return try {
+            method.invoke(target, *args)
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
     fun field(target: Any?, name: String): Any? {
         if (target == null) return null
 

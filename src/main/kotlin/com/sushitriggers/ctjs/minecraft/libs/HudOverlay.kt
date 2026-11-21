@@ -16,6 +16,7 @@ object HudOverlay {
     private val panels = ConcurrentHashMap<String, Panel>()
     private val entries = ConcurrentHashMap<String, Entry>()
     private var drawCalls = 0
+    private var current: GuiGraphicsExtractor? = null
     private var error: String? = null
     private var registered = false
 
@@ -70,8 +71,34 @@ object HudOverlay {
         return (Refl.call(window, *names) as? Number)?.toInt() ?: 0
     }
 
+    /** Only works inside register("renderOverlay", ...) callbacks. */
+    @JvmStatic
+    fun text(text: String, x: Int, y: Int, color: Int) {
+        val g = current ?: return
+        g.text(Minecraft.getInstance().font, text, x, y, color or (0xFF shl 24), true)
+    }
+
+    @JvmStatic
+    fun rect(x: Int, y: Int, w: Int, h: Int, argb: Int) {
+        current?.fill(x, y, x + w, y + h, argb)
+    }
+
+    @JvmStatic
+    fun outline(x: Int, y: Int, w: Int, h: Int, argb: Int) {
+        current?.outline(x, y, w, h, argb)
+    }
+
     private fun draw(graphics: GuiGraphicsExtractor) {
         drawCalls++
+
+        current = graphics
+        try {
+            com.sushitriggers.ctjs.triggers.TriggerType.RenderOverlay.triggerAll()
+        } catch (e: Throwable) {
+        } finally {
+            current = null
+        }
+
         if (entries.isEmpty() && panels.isEmpty()) return
         val font = Minecraft.getInstance().font
 

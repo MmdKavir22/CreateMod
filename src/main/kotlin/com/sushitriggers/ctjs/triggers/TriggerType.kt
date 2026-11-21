@@ -83,6 +83,9 @@ enum class TriggerType {
     EntityDamage,
 
     // misc
+    Event,
+    ContainerOpen,
+    ContainerClose,
     Forge,
     Command,
     Other;

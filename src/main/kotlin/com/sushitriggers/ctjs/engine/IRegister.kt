@@ -22,9 +22,14 @@ interface IRegister {
 
         val func = this::class.java.methods.firstOrNull {
             it.name.lowercase() == name && it.parameterCount == 1
-        } ?: throw NoSuchMethodException("No trigger type named '$triggerType'")
+        }
 
-        return func.invoke(this, method) as Trigger
+        if (func != null) return func.invoke(this, method) as Trigger
+
+        val type = TriggerType.values().firstOrNull { it.name.equals(triggerType, ignoreCase = true) }
+            ?: TriggerType.Other
+
+        return RegularTrigger(method, type, getImplementationLoader())
     }
 
     fun registerTick(method: Any): RegularTrigger {

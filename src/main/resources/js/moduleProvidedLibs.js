@@ -45,6 +45,10 @@
     loadClass("com.sushitriggers.ctjs.minecraft.libs.FileLib");
     loadClass("com.sushitriggers.ctjs.minecraft.libs.MathLib");
     loadClass("com.sushitriggers.ctjs.minecraft.libs.HudOverlay", "Hud");
+    loadClass("com.sushitriggers.ctjs.minecraft.libs.PlayerLib", "Player");
+    loadClass("com.sushitriggers.ctjs.minecraft.libs.WorldLib", "World");
+    loadClass("com.sushitriggers.ctjs.minecraft.libs.ClientLib", "Client");
+    loadClass("com.sushitriggers.ctjs.minecraft.libs.ContainerLib", "Container");
 
     // Triggers
     loadInstance("com.sushitriggers.ctjs.engine.langs.js.JSRegister", "TriggerRegister");
