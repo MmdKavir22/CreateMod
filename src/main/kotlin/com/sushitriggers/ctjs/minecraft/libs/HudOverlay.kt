@@ -28,9 +28,48 @@ object HudOverlay {
         entries[id] = Entry(text, x, y, color)
     }
 
+    @JvmField
+    @Volatile
+    var moveLockId: String? = null
+
+    @JvmField
+    @Volatile
+    var moveLockTime = 0L
+
     @JvmStatic
     fun panel(id: String, title: String, titleColor: Int, lines: Array<String>, colors: IntArray, x: Int, y: Int) {
-        panels[id] = Panel(title, titleColor, lines.toList(), colors.toList(), x, y)
+        val old = panels[id]
+        val locked = moveLockId == id && System.currentTimeMillis() - moveLockTime < 400
+        val px = if (locked && old != null) old.x else x
+        val py = if (locked && old != null) old.y else y
+        panels[id] = Panel(title, titleColor, lines.toList(), colors.toList(), px, py)
+    }
+
+    private fun panelWidth(panel: Panel): Int {
+        var width = textWidth(panel.title)
+        panel.lines.forEach { width = maxOf(width, textWidth(it)) }
+        return width + 12
+    }
+
+    private fun panelHeight(panel: Panel) = 12 + 11 + panel.lines.size * 11 + 3
+
+    /** x, y, width, height of a panel or null */
+    @JvmStatic
+    fun bounds(id: String): IntArray? {
+        val p = panels[id] ?: return null
+        return intArrayOf(p.x, p.y, panelWidth(p), panelHeight(p))
+    }
+
+    @JvmStatic
+    fun move(id: String, x: Int, y: Int) {
+        val p = panels[id] ?: return
+        panels[id] = Panel(p.title, p.titleColor, p.lines, p.colors, x, y)
+    }
+
+    /** Opens a screen where the user drags the panel with the mouse. callback(x, y) is called when released. */
+    @JvmStatic
+    fun edit(id: String, callback: java.util.function.BiConsumer<Int, Int>) {
+        com.sushitriggers.ctjs.gui.ScriptMenu.openMover(id, callback)
     }
 
     @JvmStatic
