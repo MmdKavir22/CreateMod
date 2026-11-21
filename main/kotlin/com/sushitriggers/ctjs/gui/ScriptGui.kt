@@ -101,6 +101,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
             Reference.loadCT()
             rebuild()
         })
+        rows += Row("§eOpen modules folder", { openModulesFolder(); rebuild() })
         rows += Row("§b✎ Open code editor", { tab = Tab.EDITOR; page = 0; rebuild() })
         rows += Row("§b☁ Import scripts from GitHub", { tab = Tab.SCRIPTS; page = 0; rebuild() })
         rows += Row(if (CTLog.recording) "§c■ Stop recording log" else "§a● Start recording log", {
@@ -256,6 +257,22 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
                     editDirty = true
                 }
             } else inputs[id] = v
+        }
+    }
+
+    private fun openModulesFolder() {
+        try {
+            val dir = ModuleManager.modulesFolder.absoluteFile.apply { mkdirs() }
+            val os = System.getProperty("os.name").lowercase()
+            val command = when {
+                "win" in os -> listOf("explorer", dir.path)
+                "mac" in os -> listOf("open", dir.path)
+                else -> listOf("xdg-open", dir.path)
+            }
+            ProcessBuilder(command).start()
+            status = "Opened modules folder"
+        } catch (e: Throwable) {
+            status = "Could not open folder: ${ModuleManager.modulesFolder.path}"
         }
     }
 
@@ -543,6 +560,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
         val rows = mutableListOf<Row>()
         rows += header("CODE EDITOR (local files only)")
         rows += Row("", input = Input("newScript", "new script name", { createScript(it) }, "Create"))
+        rows += Row("§eOpen modules folder", { openModulesFolder(); rebuild() })
         rows += Row("§7Pick a file to edit. Changes are saved only on your computer.")
 
         val folders = ModuleManager.modulesFolder.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name.lowercase() }
@@ -602,6 +620,7 @@ class ScriptGui : Screen(Component.literal("SushiTriggers")) {
             Reference.loadCT()
             rebuild()
         })
+        rows += Row("§eOpen modules folder", { openModulesFolder(); rebuild() })
         rows += Row("§7${modules.size} modules in ${ModuleManager.modulesFolder.path}")
 
         modules.forEach { module ->
